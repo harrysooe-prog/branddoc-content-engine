@@ -43,7 +43,7 @@ export default async function handler(req, res) {
     }
   }
 
-  try {
+ try {
     const response = await fetch('https://www.wixapis.com/blog/v3/posts', {
       method: 'POST',
       headers: {
@@ -54,12 +54,14 @@ export default async function handler(req, res) {
       body: JSON.stringify(postPayload)
     })
 
-    const data = await response.json()
+    const rawText = await response.text()
+    let data = {}
+    try { data = JSON.parse(rawText) } catch (_) {}
 
     if (!response.ok) {
       return res.status(500).json({
         error: 'Wix Publishing fehlgeschlagen',
-        detail: JSON.stringify(data)
+        detail: rawText || `HTTP ${response.status}`
       })
     }
 
@@ -67,4 +69,3 @@ export default async function handler(req, res) {
   } catch (err) {
     res.status(500).json({ error: 'Publishing fehlgeschlagen: ' + err.message })
   }
-}
