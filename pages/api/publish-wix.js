@@ -50,8 +50,7 @@ export default async function handler(req, res) {
       })
     }
 
-    res.json({ success: true, postId: data.post?.id, postUrl: data.post?.url })
-
+res.json({ success: true, postId: data.post?.id, postUrl: data.post?.url })
   } catch (err) {
     res.status(500).json({ error: 'Publishing fehlgeschlagen: ' + err.message })
   }
