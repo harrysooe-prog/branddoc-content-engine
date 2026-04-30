@@ -61,7 +61,6 @@ export default function Home() {
     utter.rate = 1.0
     utter.pitch = 1.0
 
-    // Try to find a German voice
     const voices = window.speechSynthesis.getVoices()
     const german = voices.find(v => v.lang.startsWith('de'))
     if (german) utter.voice = german
@@ -235,7 +234,11 @@ export default function Home() {
           imageAlt: selectedImage?.alt || null
         })
       })
-      const d = await r.json()
+      const rawText = await r.text()
+      let d = {}
+      try { d = JSON.parse(rawText) } catch (_) {
+        throw new Error('Wix API: Ungültige Antwort — ' + rawText.slice(0, 200))
+      }
       if (!r.ok) throw new Error(d.error + (d.detail ? ': ' + d.detail : ''))
       setPublished(true)
       setPublishedUrl(d.postUrl || '')
@@ -265,14 +268,12 @@ export default function Home() {
     stopSpeaking()
   }
 
-  // --- Helpers ---
   // --- Client-side PDF extraction using PDF.js ---
   const extractPdfClientSide = (file) => new Promise((resolve, reject) => {
     const reader = new FileReader()
     reader.onload = async (e) => {
       try {
         const typedArray = new Uint8Array(e.target.result)
-        // Dynamically load PDF.js from CDN
         const script = document.createElement('script')
         script.src = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js'
         script.onload = async () => {
@@ -297,7 +298,6 @@ export default function Home() {
           }
         }
         script.onerror = () => reject(new Error('PDF.js konnte nicht geladen werden'))
-        // Only add if not already loaded
         if (!window.pdfjsLib) {
           document.head.appendChild(script)
         } else {
@@ -309,13 +309,6 @@ export default function Home() {
     }
     reader.onerror = () => reject(new Error('Datei konnte nicht gelesen werden'))
     reader.readAsArrayBuffer(file)
-  })
-
-  const fileToBase64 = (file) => new Promise((res, rej) => {
-    const reader = new FileReader()
-    reader.onload = () => res(reader.result.split(',')[1])
-    reader.onerror = rej
-    reader.readAsDataURL(file)
   })
 
   const handleFileDrop = (e) => {
