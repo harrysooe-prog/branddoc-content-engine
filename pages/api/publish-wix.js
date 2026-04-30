@@ -3,21 +3,6 @@ export default async function handler(req, res) {
 
   const { title, article, seoTitle, seoDescription, seoSlug, imageUrl, imageAlt } = req.body
 
-  // Convert plain text article to basic HTML
-  const lines = article.split('\n').filter(l => l.trim())
-  let htmlContent = ''
-  for (const line of lines) {
-    if (line.startsWith('# ')) {
-      htmlContent += `<h1>${line.slice(2)}</h1>\n`
-    } else if (line.startsWith('## ')) {
-      htmlContent += `<h2>${line.slice(3)}</h2>\n`
-    } else if (line.startsWith('### ')) {
-      htmlContent += `<h3>${line.slice(4)}</h3>\n`
-    } else {
-      htmlContent += `<p>${line}</p>\n`
-    }
-  }
-
   const postPayload = {
     post: {
       title: title || seoTitle,
@@ -43,7 +28,7 @@ export default async function handler(req, res) {
     }
   }
 
- try {
+  try {
     const response = await fetch('https://www.wixapis.com/blog/v3/posts', {
       method: 'POST',
       headers: {
@@ -66,6 +51,8 @@ export default async function handler(req, res) {
     }
 
     res.json({ success: true, postId: data.post?.id, postUrl: data.post?.url })
+
   } catch (err) {
     res.status(500).json({ error: 'Publishing fehlgeschlagen: ' + err.message })
   }
+}
