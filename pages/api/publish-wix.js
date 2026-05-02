@@ -1,7 +1,7 @@
 export default async function handler(req, res) {
   if (req.method !== 'POST') return res.status(405).end()
 
-  const { title, article, seoTitle, seoDescription, seoSlug, imageUrl, imageAlt } = req.body
+  const { title, article, seoTitle, seoDescription, seoSlug } = req.body
 
   const postPayload = {
     draftPost: {
@@ -18,13 +18,7 @@ export default async function handler(req, res) {
         title: seoTitle,
         description: seoDescription,
         slug: seoSlug
-      },
-      ...(imageUrl && {
-        media: {
-          custom: imageUrl,
-          isCustomCoverImage: true
-        }
-      })
+      }
     }
   }
 
