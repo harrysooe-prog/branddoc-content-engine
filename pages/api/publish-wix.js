@@ -6,7 +6,6 @@ export default async function handler(req, res) {
   const postPayload = {
     draftPost: {
       title: title || seoTitle,
-      memberId: '1777714568955',
       richContent: {
         nodes: [
           {
@@ -28,7 +27,7 @@ export default async function handler(req, res) {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
-        Authorization: process.env.WIX_API_KEY,
+        'Authorization': process.env.WIX_API_KEY,
         'wix-site-id': process.env.WIX_SITE_ID
       },
       body: JSON.stringify(postPayload)
