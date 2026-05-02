@@ -29,7 +29,7 @@ export default async function handler(req, res) {
   }
 
   try {
-    const response = await fetch('https://www.wixapis.com/blog/v3/posts', {
+    const response = await fetch('https://www.wixapis.com/blog/v3/draft-posts', {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
@@ -50,7 +50,8 @@ export default async function handler(req, res) {
       })
     }
 
-res.json({ success: true, postId: data.post?.id, postUrl: data.post?.url })
+    res.json({ success: true, postId: data.post?.id, postUrl: data.post?.url })
+
   } catch (err) {
     res.status(500).json({ error: 'Publishing fehlgeschlagen: ' + err.message })
   }
