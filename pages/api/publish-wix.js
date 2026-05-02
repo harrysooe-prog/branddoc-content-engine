@@ -6,6 +6,7 @@ export default async function handler(req, res) {
   const postPayload = {
     draftPost: {
       title: title || seoTitle,
+      memberId: '1777714568955',
       richContent: {
         nodes: [
           {
