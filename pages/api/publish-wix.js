@@ -4,7 +4,7 @@ export default async function handler(req, res) {
   const { title, article, seoTitle, seoDescription, seoSlug, imageUrl, imageAlt } = req.body
 
   const postPayload = {
-    post: {
+    draftPost: {
       title: title || seoTitle,
       richContent: {
         nodes: [
@@ -50,7 +50,7 @@ export default async function handler(req, res) {
       })
     }
 
-    res.json({ success: true, postId: data.post?.id, postUrl: data.post?.url })
+    res.json({ success: true, postId: data.draftPost?.id, postUrl: data.draftPost?.url })
 
   } catch (err) {
     res.status(500).json({ error: 'Publishing fehlgeschlagen: ' + err.message })
