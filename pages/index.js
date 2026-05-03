@@ -1,7 +1,7 @@
 import { useState, useRef, useEffect, useCallback } from 'react'
 import Head from 'next/head'
 
-const STEPS = ['Input', 'Artikel', 'Feedback', 'Bild', 'Publish']
+const STEPS = ['Input', 'Artikel', 'Stimme', 'Bild', 'Publish']
 
 export default function Home() {
   const [currentStep, setCurrentStep] = useState(0)
@@ -23,19 +23,32 @@ export default function Home() {
   const [sourceTitle, setSourceTitle] = useState('')
   const [iteration, setIteration] = useState(0)
 
+  // Perspectives & links
+  const [perspectives, setPerspectives] = useState(['', '', ''])
+  const [selectedPerspective, setSelectedPerspective] = useState(null)
+  const [editedPerspective, setEditedPerspective] = useState('')
+  const [internalLinks, setInternalLinks] = useState([])
+  const [selectedLinks, setSelectedLinks] = useState([])
+
+  // Feedback
+  const [feedbackText, setFeedbackText] = useState('')
+
+  // TTS
   const [isSpeaking, setIsSpeaking] = useState(false)
   const [speechSupported, setSpeechSupported] = useState(false)
   const utteranceRef = useRef(null)
 
+  // Voice
   const [isRecording, setIsRecording] = useState(false)
-  const [feedbackText, setFeedbackText] = useState('')
   const [voiceSupported, setVoiceSupported] = useState(false)
   const recognitionRef = useRef(null)
 
+  // Images
   const [images, setImages] = useState([])
   const [selectedImage, setSelectedImage] = useState(null)
   const [imagesLoading, setImagesLoading] = useState(false)
 
+  // Publish
   const [published, setPublished] = useState(false)
   const [publishedUrl, setPublishedUrl] = useState('')
 
@@ -52,7 +65,6 @@ export default function Home() {
     const utter = new SpeechSynthesisUtterance(article)
     utter.lang = 'de-DE'
     utter.rate = 1.0
-    utter.pitch = 1.0
     const voices = window.speechSynthesis.getVoices()
     const german = voices.find(v => v.lang.startsWith('de'))
     if (german) utter.voice = german
@@ -151,8 +163,49 @@ export default function Home() {
     setSeoSlug(d.seoSlug)
     setFocusKeyword(d.focusKeyword || '')
     setUnsplashQuery(d.unsplashQuery)
+    setPerspectives(d.perspectives || ['', '', ''])
+    setInternalLinks(d.internalLinks || [])
+    setSelectedPerspective(null)
+    setEditedPerspective('')
+    setSelectedLinks([])
     setIteration(prev => prev + 1)
     setCurrentStep(1)
+  }
+
+  // Apply perspective + links into article
+  const handleApplyVoice = async () => {
+    if (!editedPerspective.trim() && selectedLinks.length === 0) {
+      setCurrentStep(3)
+      handleLoadImages()
+      return
+    }
+    setLoading(true)
+    setLoadingMsg('Deine Stimme wird eingebaut…')
+    try {
+      const r = await fetch('/api/generate', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          sourceContent: sourceContent,
+          sourceTitle: sourceTitle,
+          inputType,
+          feedback: `Baue folgendes Zitat von Harald an passender Stelle in den Artikel ein (als direktes Zitat oder als Übergang): "${editedPerspective}"
+${selectedLinks.length > 0 ? `\nFüge außerdem diese internen Verlinkungen an passenden Stellen als Markdown-Links ein:\n${selectedLinks.map(l => `- [${l.anchor}](${l.url})`).join('\n')}` : ''}
+Behalte sonst alles andere gleich.`,
+          previousArticle: article
+        })
+      })
+      const d = await r.json()
+      if (!r.ok) throw new Error(d.error)
+      setArticle(d.article)
+      setCurrentStep(3)
+      handleLoadImages()
+    } catch (err) {
+      setError(err.message)
+    } finally {
+      setLoading(false)
+      setLoadingMsg('')
+    }
   }
 
   const handleFeedback = async () => {
@@ -246,6 +299,11 @@ export default function Home() {
     setTextInput('')
     setPdfFile(null)
     setFocusKeyword('')
+    setPerspectives(['', '', ''])
+    setSelectedPerspective(null)
+    setEditedPerspective('')
+    setInternalLinks([])
+    setSelectedLinks([])
     stopSpeaking()
   }
 
@@ -268,24 +326,14 @@ export default function Home() {
               fullText += textContent.items.map(item => item.str).join(' ') + ' '
             }
             const cleaned = fullText.replace(/\s+/g, ' ').trim().slice(0, 12000)
-            if (!cleaned || cleaned.length < 50) {
-              reject(new Error('PDF-Text konnte nicht extrahiert werden.'))
-            } else {
-              resolve(cleaned)
-            }
-          } catch (err) {
-            reject(new Error('PDF Verarbeitung fehlgeschlagen: ' + err.message))
-          }
+            if (!cleaned || cleaned.length < 50) reject(new Error('PDF-Text konnte nicht extrahiert werden.'))
+            else resolve(cleaned)
+          } catch (err) { reject(new Error('PDF Verarbeitung fehlgeschlagen: ' + err.message)) }
         }
         script.onerror = () => reject(new Error('PDF.js konnte nicht geladen werden'))
-        if (!window.pdfjsLib) {
-          document.head.appendChild(script)
-        } else {
-          script.onload()
-        }
-      } catch (err) {
-        reject(err)
-      }
+        if (!window.pdfjsLib) document.head.appendChild(script)
+        else script.onload()
+      } catch (err) { reject(err) }
     }
     reader.onerror = () => reject(new Error('Datei konnte nicht gelesen werden'))
     reader.readAsArrayBuffer(file)
@@ -295,6 +343,14 @@ export default function Home() {
     e.preventDefault()
     const file = e.dataTransfer.files[0]
     if (file?.type === 'application/pdf') setPdfFile(file)
+  }
+
+  const toggleLink = (link) => {
+    setSelectedLinks(prev =>
+      prev.find(l => l.url === link.url)
+        ? prev.filter(l => l.url !== link.url)
+        : [...prev, link]
+    )
   }
 
   return (
@@ -310,7 +366,7 @@ export default function Home() {
           <div className="header-logo">bD</div>
           <div>
             <div className="header-title">brandDOC Content Engine</div>
-            <div className="header-sub">Input → Artikel → Feedback → Bild → Wix</div>
+            <div className="header-sub">Input → Artikel → Stimme → Bild → Publish</div>
           </div>
         </header>
 
@@ -346,8 +402,8 @@ export default function Home() {
           </div>
         )}
 
-        {/* STEP 1: ARTICLE — editable textarea */}
-        {currentStep >= 1 && !published && (
+        {/* STEP 1: ARTICLE */}
+        {currentStep === 1 && !published && (
           <div className="card">
             <div className="card-title">
               <span className="icon">📝</span> Artikel
@@ -373,14 +429,93 @@ export default function Home() {
             </div>
             <div className="btn-row">
               <button className="btn btn-primary" onClick={handleFeedback} disabled={loading || !feedbackText.trim()}>🔄 Neue Version</button>
-              <button className="btn btn-secondary" onClick={() => { setCurrentStep(3); handleLoadImages(); }} disabled={imagesLoading}>✅ Passt — weiter zu Bild</button>
+              <button className="btn btn-secondary" onClick={() => setCurrentStep(2)}>✅ Passt — weiter zu Stimme</button>
               <button className="btn btn-secondary" onClick={handleReset}>↩ Von vorne</button>
             </div>
           </div>
         )}
 
+        {/* STEP 2: DEINE STIMME */}
+        {currentStep === 2 && !published && (
+          <div className="card">
+            <div className="card-title"><span className="icon">🎙</span> Deine Stimme</div>
+            <div style={{ fontSize: '0.85rem', color: 'var(--text-muted)', marginBottom: '1.25rem' }}>
+              Wähle einen Perspektiv-Vorschlag, bearbeite ihn — und er wird in den Artikel eingebaut.
+            </div>
+
+            {/* 3 Perspective Options */}
+            {perspectives.map((p, i) => (
+              <div
+                key={i}
+                onClick={() => { setSelectedPerspective(i); setEditedPerspective(p) }}
+                style={{
+                  background: selectedPerspective === i ? 'rgba(2, 133, 206, 0.12)' : 'rgba(255,255,255,0.04)',
+                  border: `1px solid ${selectedPerspective === i ? 'var(--blue)' : 'var(--border)'}`,
+                  borderRadius: '10px',
+                  padding: '1rem',
+                  marginBottom: '0.75rem',
+                  cursor: 'pointer',
+                  transition: 'all 0.15s'
+                }}
+              >
+                <div style={{ fontSize: '0.7rem', fontWeight: '700', textTransform: 'uppercase', color: 'var(--blue-light)', marginBottom: '0.4rem', letterSpacing: '0.06em' }}>
+                  {i === 0 ? '💬 Persönlich & direkt' : i === 1 ? '⚡ Provokant & fordernd' : '🏭 Praxis & KMU'}
+                </div>
+                <div style={{ fontSize: '0.88rem', lineHeight: '1.6', color: 'rgba(255,255,255,0.85)' }}>{p || '—'}</div>
+              </div>
+            ))}
+
+            {/* Edit selected */}
+            {selectedPerspective !== null && (
+              <div style={{ marginTop: '1rem' }}>
+                <div style={{ fontSize: '0.72rem', fontWeight: '700', textTransform: 'uppercase', color: 'var(--text-muted)', marginBottom: '0.4rem' }}>✏️ Bearbeiten</div>
+                <textarea
+                  value={editedPerspective}
+                  onChange={e => setEditedPerspective(e.target.value)}
+                  rows={4}
+                  style={{ resize: 'vertical' }}
+                />
+              </div>
+            )}
+
+            {/* Internal Links */}
+            {internalLinks.length > 0 && (
+              <>
+                <hr className="divider" />
+                <div className="card-title" style={{ marginBottom: '0.75rem' }}><span className="icon">🔗</span> Interne Verlinkungen</div>
+                <div style={{ fontSize: '0.82rem', color: 'var(--text-muted)', marginBottom: '0.75rem' }}>Wähle welche Artikel verlinkt werden sollen:</div>
+                {internalLinks.map((link, i) => (
+                  <div
+                    key={i}
+                    onClick={() => toggleLink(link)}
+                    style={{
+                      background: selectedLinks.find(l => l.url === link.url) ? 'rgba(2, 133, 206, 0.12)' : 'rgba(255,255,255,0.04)',
+                      border: `1px solid ${selectedLinks.find(l => l.url === link.url) ? 'var(--blue)' : 'var(--border)'}`,
+                      borderRadius: '8px',
+                      padding: '0.75rem 1rem',
+                      marginBottom: '0.5rem',
+                      cursor: 'pointer',
+                      transition: 'all 0.15s'
+                    }}
+                  >
+                    <div style={{ fontSize: '0.82rem', color: 'var(--white)', marginBottom: '0.2rem' }}>📄 {link.title}</div>
+                    <div style={{ fontSize: '0.75rem', color: 'var(--blue-light)' }}>Ankertext: „{link.anchor}"</div>
+                  </div>
+                ))}
+              </>
+            )}
+
+            <div className="btn-row" style={{ marginTop: '1.5rem' }}>
+              <button className="btn btn-primary" onClick={handleApplyVoice} disabled={loading}>
+                {editedPerspective.trim() || selectedLinks.length > 0 ? '✅ Einbauen & weiter zu Bild' : '⏭ Überspringen → Bild'}
+              </button>
+              <button className="btn btn-secondary" onClick={() => setCurrentStep(1)}>← Zurück zum Artikel</button>
+            </div>
+          </div>
+        )}
+
         {/* STEP 3: IMAGES + SEO */}
-        {currentStep >= 3 && !published && (
+        {currentStep === 3 && !published && (
           <div className="card">
             <div className="card-title"><span className="icon">🖼</span> Titelbild wählen</div>
             {imagesLoading && <div className="status loading"><div className="spinner" /> Bilder werden gesucht…</div>}
@@ -405,7 +540,6 @@ export default function Home() {
 
             <hr className="divider" />
 
-            {/* SEO Editing — alle Felder mit type="text" damit CSS greift */}
             <div className="card-title" style={{ marginBottom: '1rem' }}><span className="icon">🔍</span> SEO bearbeiten</div>
 
             <div style={{ marginBottom: '1rem' }}>
@@ -426,12 +560,11 @@ export default function Home() {
             <div style={{ marginBottom: '1.5rem' }}>
               <div style={{ fontSize: '0.72rem', fontWeight: '700', textTransform: 'uppercase', letterSpacing: '0.06em', color: 'var(--text-muted)', marginBottom: '0.4rem' }}>🎯 Fokus-Keyword</div>
               <input type="text" value={focusKeyword} onChange={e => setFocusKeyword(e.target.value)} placeholder="z.B. Markenpositionierung KMU" />
-              <div style={{ fontSize: '0.7rem', color: 'var(--text-muted)', marginTop: '0.3rem' }}>Wird in Meta-Keywords und Snippet verwendet.</div>
             </div>
 
             {/* Google Snippet Preview */}
             <div style={{ background: 'white', borderRadius: '8px', padding: '1rem 1.25rem', marginBottom: '1.5rem' }}>
-              <div style={{ fontSize: '0.65rem', color: '#888', marginBottom: '0.4rem', fontFamily: 'sans-serif' }}>Google Vorschau</div>
+              <div style={{ fontSize: '0.65rem', color: '#888', marginBottom: '0.4rem' }}>Google Vorschau</div>
               <div style={{ color: '#1a0dab', fontSize: '1rem', fontWeight: '600', marginBottom: '0.15rem', fontFamily: 'arial, sans-serif' }}>{seoTitle || 'SEO Titel…'}</div>
               <div style={{ color: '#006621', fontSize: '0.78rem', marginBottom: '0.2rem', fontFamily: 'arial, sans-serif' }}>branddoc.at › blog › {seoSlug || 'url-slug'}</div>
               <div style={{ color: '#545454', fontSize: '0.82rem', fontFamily: 'arial, sans-serif', lineHeight: '1.4' }}>{seoDescription || 'Meta Description…'}</div>
