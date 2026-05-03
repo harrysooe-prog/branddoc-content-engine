@@ -1,9 +1,9 @@
 export default async function handler(req, res) {
   if (req.method !== 'POST') return res.status(405).end()
 
-  const { title, article, seoTitle, seoDescription, seoSlug } = req.body
+  const { title, article, seoTitle, seoDescription, seoSlug, imageUrl, focusKeyword } = req.body
 
-  const postPayload = {
+  const draftPayload = {
     draftPost: {
       title: title || seoTitle,
       memberId: '1df8a1bf-27b1-4c1d-bcd9-231133ed3297',
@@ -18,34 +18,68 @@ export default async function handler(req, res) {
       seoData: {
         title: seoTitle,
         description: seoDescription,
-        slug: seoSlug
-      }
+        slug: seoSlug,
+        tags: [
+          ...(focusKeyword ? [{ type: 'meta', props: { name: 'keywords', content: focusKeyword } }] : [])
+        ]
+      },
+      ...(imageUrl && {
+        coverMedia: { image: { url: imageUrl } }
+      })
     }
   }
 
   try {
-    const response = await fetch('https://www.wixapis.com/blog/v3/draft-posts', {
+    // Schritt 1: Entwurf erstellen
+    const draftResponse = await fetch('https://www.wixapis.com/blog/v3/draft-posts', {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
         'Authorization': process.env.WIX_API_KEY,
         'wix-site-id': process.env.WIX_SITE_ID
       },
-      body: JSON.stringify(postPayload)
+      body: JSON.stringify(draftPayload)
     })
 
-    const rawText = await response.text()
-    let data = {}
-    try { data = JSON.parse(rawText) } catch (_) {}
+    const draftText = await draftResponse.text()
+    let draftData = {}
+    try { draftData = JSON.parse(draftText) } catch (_) {}
 
-    if (!response.ok) {
+    if (!draftResponse.ok) {
       return res.status(500).json({
-        error: 'Wix Publishing fehlgeschlagen',
-        detail: rawText || `HTTP ${response.status}`
+        error: 'Entwurf fehlgeschlagen',
+        detail: draftText || `HTTP ${draftResponse.status}`
       })
     }
 
-    res.json({ success: true, postId: data.draftPost?.id, postUrl: data.draftPost?.url })
+    const draftId = draftData.draftPost?.id
+
+    // Schritt 2: Entwurf direkt veröffentlichen
+    const publishResponse = await fetch(`https://www.wixapis.com/blog/v3/draft-posts/${draftId}/publish`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': process.env.WIX_API_KEY,
+        'wix-site-id': process.env.WIX_SITE_ID
+      }
+    })
+
+    const publishText = await publishResponse.text()
+    let publishData = {}
+    try { publishData = JSON.parse(publishText) } catch (_) {}
+
+    if (!publishResponse.ok) {
+      return res.status(500).json({
+        error: 'Veröffentlichen fehlgeschlagen',
+        detail: publishText || `HTTP ${publishResponse.status}`
+      })
+    }
+
+    res.json({
+      success: true,
+      postId: publishData.post?.id,
+      postUrl: publishData.post?.url
+    })
 
   } catch (err) {
     res.status(500).json({ error: 'Publishing fehlgeschlagen: ' + err.message })
