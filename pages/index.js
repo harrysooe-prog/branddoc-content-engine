@@ -13,7 +13,6 @@ export default function Home() {
   const [loadingMsg, setLoadingMsg] = useState('')
   const [error, setError] = useState('')
 
-  // Article state
   const [article, setArticle] = useState('')
   const [seoTitle, setSeoTitle] = useState('')
   const [seoDescription, setSeoDescription] = useState('')
@@ -24,27 +23,22 @@ export default function Home() {
   const [sourceTitle, setSourceTitle] = useState('')
   const [iteration, setIteration] = useState(0)
 
-  // TTS state
   const [isSpeaking, setIsSpeaking] = useState(false)
   const [speechSupported, setSpeechSupported] = useState(false)
   const utteranceRef = useRef(null)
 
-  // Voice feedback state
   const [isRecording, setIsRecording] = useState(false)
   const [feedbackText, setFeedbackText] = useState('')
   const [voiceSupported, setVoiceSupported] = useState(false)
   const recognitionRef = useRef(null)
 
-  // Image state
   const [images, setImages] = useState([])
   const [selectedImage, setSelectedImage] = useState(null)
   const [imagesLoading, setImagesLoading] = useState(false)
 
-  // Publish state
   const [published, setPublished] = useState(false)
   const [publishedUrl, setPublishedUrl] = useState('')
 
-  // File input ref
   const fileInputRef = useRef(null)
 
   useEffect(() => {
@@ -52,7 +46,6 @@ export default function Home() {
     setVoiceSupported(typeof window !== 'undefined' && ('SpeechRecognition' in window || 'webkitSpeechRecognition' in window))
   }, [])
 
-  // --- TTS ---
   const speakArticle = useCallback(() => {
     if (!speechSupported || !article) return
     window.speechSynthesis.cancel()
@@ -75,7 +68,6 @@ export default function Home() {
     setIsSpeaking(false)
   }, [])
 
-  // --- Voice feedback ---
   const startRecording = useCallback(() => {
     if (!voiceSupported) return
     const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition
@@ -99,7 +91,6 @@ export default function Home() {
     setIsRecording(false)
   }, [])
 
-  // --- Step 0: Process input ---
   const handleGenerate = async () => {
     setError('')
     setLoading(true)
@@ -140,7 +131,6 @@ export default function Home() {
     }
   }
 
-  // --- Generate / Regenerate ---
   const generateArticle = async (srcContent, srcTitle, feedback, prevArticle) => {
     const r = await fetch('/api/generate', {
       method: 'POST',
@@ -165,7 +155,6 @@ export default function Home() {
     setCurrentStep(1)
   }
 
-  // --- Feedback submit ---
   const handleFeedback = async () => {
     if (!feedbackText.trim()) return
     setError('')
@@ -183,7 +172,6 @@ export default function Home() {
     }
   }
 
-  // --- Load images ---
   const handleLoadImages = async () => {
     setImagesLoading(true)
     setError('')
@@ -204,7 +192,6 @@ export default function Home() {
     }
   }
 
-  // --- Publish ---
   const handlePublish = async () => {
     if (!selectedImage) {
       setError('Bitte zuerst ein Titelbild auswählen.')
@@ -245,7 +232,6 @@ export default function Home() {
     }
   }
 
-  // --- Reset ---
   const handleReset = () => {
     setCurrentStep(0)
     setArticle('')
@@ -263,7 +249,6 @@ export default function Home() {
     stopSpeaking()
   }
 
-  // --- Client-side PDF extraction ---
   const extractPdfClientSide = (file) => new Promise((resolve, reject) => {
     const reader = new FileReader()
     reader.onload = async (e) => {
@@ -331,75 +316,48 @@ export default function Home() {
 
         <div className="steps">
           {STEPS.map((s, i) => (
-            <div key={s} className={`step ${i === currentStep ? 'active' : ''} ${i < currentStep ? 'done' : ''}`}>
-              {s}
-            </div>
+            <div key={s} className={`step ${i === currentStep ? 'active' : ''} ${i < currentStep ? 'done' : ''}`}>{s}</div>
           ))}
         </div>
 
-        {error && (
-          <div className="status error">
-            <span>⚠️</span> {error}
-          </div>
-        )}
-
-        {loading && (
-          <div className="status loading">
-            <div className="spinner" />
-            {loadingMsg || 'Einen Moment…'}
-          </div>
-        )}
+        {error && <div className="status error"><span>⚠️</span> {error}</div>}
+        {loading && <div className="status loading"><div className="spinner" />{loadingMsg || 'Einen Moment…'}</div>}
 
         {/* STEP 0: INPUT */}
         {currentStep === 0 && !loading && (
           <div className="card">
             <div className="card-title"><span className="icon">📥</span> Content-Quelle</div>
             <div className="input-tabs">
-              {[
-                { id: 'url', label: '🔗 URL / Artikel' },
-                { id: 'pdf', label: '📄 PDF' },
-                { id: 'text', label: '💭 Idee / Text' }
-              ].map(t => (
-                <button key={t.id} className={`input-tab ${inputType === t.id ? 'active' : ''}`} onClick={() => setInputType(t.id)}>
-                  {t.label}
-                </button>
+              {[{ id: 'url', label: '🔗 URL / Artikel' }, { id: 'pdf', label: '📄 PDF' }, { id: 'text', label: '💭 Idee / Text' }].map(t => (
+                <button key={t.id} className={`input-tab ${inputType === t.id ? 'active' : ''}`} onClick={() => setInputType(t.id)}>{t.label}</button>
               ))}
             </div>
-            {inputType === 'url' && (
-              <input type="url" placeholder="https://..." value={urlInput} onChange={e => setUrlInput(e.target.value)} onKeyDown={e => e.key === 'Enter' && handleGenerate()} />
-            )}
+            {inputType === 'url' && <input type="url" placeholder="https://..." value={urlInput} onChange={e => setUrlInput(e.target.value)} onKeyDown={e => e.key === 'Enter' && handleGenerate()} />}
             {inputType === 'pdf' && (
               <div className={`upload-area ${pdfFile ? 'dragover' : ''}`} onDrop={handleFileDrop} onDragOver={e => e.preventDefault()} onClick={() => fileInputRef.current?.click()}>
                 <input ref={fileInputRef} type="file" accept=".pdf" onChange={e => setPdfFile(e.target.files[0])} />
-                {pdfFile ? (
-                  <span style={{ color: 'var(--blue-light)' }}>✅ {pdfFile.name}</span>
-                ) : (
-                  <><div style={{ fontSize: '2rem', marginBottom: '0.5rem' }}>📄</div>PDF hier hinziehen oder klicken</>
-                )}
+                {pdfFile ? <span style={{ color: 'var(--blue-light)' }}>✅ {pdfFile.name}</span> : <><div style={{ fontSize: '2rem', marginBottom: '0.5rem' }}>📄</div>PDF hier hinziehen oder klicken</>}
               </div>
             )}
-            {inputType === 'text' && (
-              <textarea placeholder="Idee, Notiz, eigener Text…" value={textInput} onChange={e => setTextInput(e.target.value)} rows={5} />
-            )}
+            {inputType === 'text' && <textarea placeholder="Idee, Notiz, eigener Text…" value={textInput} onChange={e => setTextInput(e.target.value)} rows={5} />}
             <div className="btn-row">
               <button className="btn btn-primary" onClick={handleGenerate} disabled={loading}>✍️ Artikel generieren</button>
             </div>
           </div>
         )}
 
-        {/* STEP 1: ARTICLE */}
+        {/* STEP 1: ARTICLE — editable textarea */}
         {currentStep >= 1 && !published && (
           <div className="card">
             <div className="card-title">
               <span className="icon">📝</span> Artikel
               {iteration > 0 && <span className="iteration-badge" style={{ marginLeft: 'auto' }}>Version {iteration}</span>}
             </div>
-            <div className="article-display">{article}</div>
+            <div style={{ fontSize: '0.75rem', color: 'var(--text-muted)', marginBottom: '0.5rem' }}>✏️ Direkt bearbeitbar</div>
+            <textarea value={article} onChange={e => setArticle(e.target.value)} rows={20} style={{ resize: 'vertical' }} />
             {speechSupported && (
               <div className="tts-bar">
-                <button className="tts-btn" onClick={isSpeaking ? stopSpeaking : speakArticle} title={isSpeaking ? 'Stop' : 'Vorlesen'}>
-                  {isSpeaking ? '⏹' : '▶'}
-                </button>
+                <button className="tts-btn" onClick={isSpeaking ? stopSpeaking : speakArticle}>{isSpeaking ? '⏹' : '▶'}</button>
                 <span className="tts-label">{isSpeaking ? 'Artikel wird vorgelesen… klick zum Stoppen' : 'Artikel anhören'}</span>
               </div>
             )}
@@ -408,7 +366,7 @@ export default function Home() {
             <div className="feedback-row">
               <textarea placeholder="Was soll anders werden?" value={feedbackText} onChange={e => setFeedbackText(e.target.value)} rows={3} />
               {voiceSupported && (
-                <button className={`voice-btn ${isRecording ? 'recording' : ''}`} onClick={isRecording ? stopRecording : startRecording} title={isRecording ? 'Aufnahme stoppen' : 'Feedback sprechen'}>
+                <button className={`voice-btn ${isRecording ? 'recording' : ''}`} onClick={isRecording ? stopRecording : startRecording}>
                   {isRecording ? '⏹' : '🎙'}
                 </button>
               )}
@@ -444,63 +402,47 @@ export default function Home() {
                 )}
               </>
             )}
-            {!imagesLoading && images.length === 0 && (
-              <p style={{ color: 'var(--text-muted)', fontSize: '0.85rem' }}>Keine Bilder gefunden.</p>
-            )}
 
             <hr className="divider" />
 
-            {/* SEO Editing */}
-            <div className="card-title" style={{ marginBottom: '0.75rem' }}><span className="icon">🔍</span> SEO bearbeiten</div>
+            {/* SEO Editing — alle Felder mit type="text" damit CSS greift */}
+            <div className="card-title" style={{ marginBottom: '1rem' }}><span className="icon">🔍</span> SEO bearbeiten</div>
 
-            <div style={{ marginBottom: '0.75rem' }}>
-              <label style={{ fontSize: '0.75rem', color: 'var(--text-muted)', display: 'block', marginBottom: '0.25rem' }}>SEO Titel</label>
-              <input value={seoTitle} onChange={e => setSeoTitle(e.target.value)} style={{ width: '100%' }} />
-            </div>
-
-            <div style={{ marginBottom: '0.75rem' }}>
-              <label style={{ fontSize: '0.75rem', color: 'var(--text-muted)', display: 'block', marginBottom: '0.25rem' }}>Meta Description (Snippet)</label>
-              <textarea value={seoDescription} onChange={e => setSeoDescription(e.target.value)} rows={3} style={{ width: '100%' }} />
-            </div>
-
-            <div style={{ marginBottom: '0.75rem' }}>
-              <label style={{ fontSize: '0.75rem', color: 'var(--text-muted)', display: 'block', marginBottom: '0.25rem' }}>URL Slug</label>
-              <input value={seoSlug} onChange={e => setSeoSlug(e.target.value.toLowerCase().replace(/\s+/g, '-'))} style={{ width: '100%', fontFamily: 'monospace', fontSize: '0.85rem' }} />
+            <div style={{ marginBottom: '1rem' }}>
+              <div style={{ fontSize: '0.72rem', fontWeight: '700', textTransform: 'uppercase', letterSpacing: '0.06em', color: 'var(--text-muted)', marginBottom: '0.4rem' }}>SEO Titel</div>
+              <input type="text" value={seoTitle} onChange={e => setSeoTitle(e.target.value)} placeholder="SEO Titel…" />
             </div>
 
             <div style={{ marginBottom: '1rem' }}>
-              <label style={{ fontSize: '0.75rem', color: 'var(--text-muted)', display: 'block', marginBottom: '0.25rem' }}>🎯 Fokus-Keyword</label>
-              <input
-                value={focusKeyword}
-                onChange={e => setFocusKeyword(e.target.value)}
-                placeholder="z.B. Markenpositionierung KMU"
-                style={{ width: '100%' }}
-              />
-              <div style={{ fontSize: '0.7rem', color: 'var(--text-muted)', marginTop: '0.25rem' }}>
-                Wird in den Meta-Keywords und im Snippet verwendet.
-              </div>
+              <div style={{ fontSize: '0.72rem', fontWeight: '700', textTransform: 'uppercase', letterSpacing: '0.06em', color: 'var(--text-muted)', marginBottom: '0.4rem' }}>Meta Description</div>
+              <textarea value={seoDescription} onChange={e => setSeoDescription(e.target.value)} rows={3} placeholder="Meta Description…" />
             </div>
 
-            {/* SEO Preview */}
-            <div style={{ background: 'white', borderRadius: '8px', padding: '1rem', marginBottom: '1rem' }}>
-              <div style={{ color: '#1a0dab', fontSize: '1rem', fontWeight: '600', marginBottom: '0.2rem' }}>{seoTitle || '—'}</div>
-              <div style={{ color: '#006621', fontSize: '0.8rem', marginBottom: '0.2rem' }}>branddoc.at/blog/{seoSlug || '—'}</div>
-              <div style={{ color: '#545454', fontSize: '0.85rem' }}>{seoDescription || '—'}</div>
+            <div style={{ marginBottom: '1rem' }}>
+              <div style={{ fontSize: '0.72rem', fontWeight: '700', textTransform: 'uppercase', letterSpacing: '0.06em', color: 'var(--text-muted)', marginBottom: '0.4rem' }}>URL Slug</div>
+              <input type="text" value={seoSlug} onChange={e => setSeoSlug(e.target.value.toLowerCase().replace(/\s+/g, '-'))} placeholder="url-slug" style={{ fontFamily: 'monospace' }} />
             </div>
 
-            <div className="btn-row" style={{ marginTop: '1.5rem' }}>
+            <div style={{ marginBottom: '1.5rem' }}>
+              <div style={{ fontSize: '0.72rem', fontWeight: '700', textTransform: 'uppercase', letterSpacing: '0.06em', color: 'var(--text-muted)', marginBottom: '0.4rem' }}>🎯 Fokus-Keyword</div>
+              <input type="text" value={focusKeyword} onChange={e => setFocusKeyword(e.target.value)} placeholder="z.B. Markenpositionierung KMU" />
+              <div style={{ fontSize: '0.7rem', color: 'var(--text-muted)', marginTop: '0.3rem' }}>Wird in Meta-Keywords und Snippet verwendet.</div>
+            </div>
+
+            {/* Google Snippet Preview */}
+            <div style={{ background: 'white', borderRadius: '8px', padding: '1rem 1.25rem', marginBottom: '1.5rem' }}>
+              <div style={{ fontSize: '0.65rem', color: '#888', marginBottom: '0.4rem', fontFamily: 'sans-serif' }}>Google Vorschau</div>
+              <div style={{ color: '#1a0dab', fontSize: '1rem', fontWeight: '600', marginBottom: '0.15rem', fontFamily: 'arial, sans-serif' }}>{seoTitle || 'SEO Titel…'}</div>
+              <div style={{ color: '#006621', fontSize: '0.78rem', marginBottom: '0.2rem', fontFamily: 'arial, sans-serif' }}>branddoc.at › blog › {seoSlug || 'url-slug'}</div>
+              <div style={{ color: '#545454', fontSize: '0.82rem', fontFamily: 'arial, sans-serif', lineHeight: '1.4' }}>{seoDescription || 'Meta Description…'}</div>
+            </div>
+
+            <div className="btn-row">
               <button className="btn btn-publish" onClick={handlePublish} disabled={loading || !selectedImage}>
                 🚀 Jetzt auf Wix veröffentlichen
               </button>
             </div>
-            {!selectedImage && (
-              <div style={{ fontSize: '0.75rem', color: 'var(--text-muted)', textAlign: 'center', marginTop: '0.5rem' }}>
-                Bitte zuerst ein Titelbild auswählen.
-              </div>
-            )}
-            <div style={{ fontSize: '0.75rem', color: 'var(--text-muted)', textAlign: 'center', marginTop: '0.5rem' }}>
-              Der Artikel wird sofort live auf branddoc.at gepostet.
-            </div>
+            {!selectedImage && <div style={{ fontSize: '0.75rem', color: 'var(--text-muted)', textAlign: 'center', marginTop: '0.5rem' }}>Bitte zuerst ein Titelbild auswählen.</div>}
           </div>
         )}
 
@@ -512,9 +454,7 @@ export default function Home() {
               <h2>Artikel ist live!</h2>
               <p>Dein Blogartikel wurde erfolgreich auf branddoc.at veröffentlicht.</p>
               {publishedUrl && (
-                <a href={publishedUrl} target="_blank" rel="noopener noreferrer" className="btn btn-secondary" style={{ display: 'inline-flex', marginBottom: '1rem' }}>
-                  🌐 Artikel ansehen
-                </a>
+                <a href={publishedUrl} target="_blank" rel="noopener noreferrer" className="btn btn-secondary" style={{ display: 'inline-flex', marginBottom: '1rem' }}>🌐 Artikel ansehen</a>
               )}
               <br />
               <button className="btn btn-primary" onClick={handleReset} style={{ marginTop: '0.75rem' }}>✍️ Nächsten Artikel schreiben</button>
