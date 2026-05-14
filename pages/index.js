@@ -9,6 +9,7 @@ export default function Home() {
   const [urlInput, setUrlInput] = useState('')
   const [textInput, setTextInput] = useState('')
   const [pdfFile, setPdfFile] = useState(null)
+  const [hinweise, setHinweise] = useState('')
   const [loading, setLoading] = useState(false)
   const [loadingMsg, setLoadingMsg] = useState('')
   const [error, setError] = useState('')
@@ -23,32 +24,29 @@ export default function Home() {
   const [sourceTitle, setSourceTitle] = useState('')
   const [iteration, setIteration] = useState(0)
 
-  // Perspectives & links
   const [perspectives, setPerspectives] = useState(['', '', ''])
   const [selectedPerspective, setSelectedPerspective] = useState(null)
   const [editedPerspective, setEditedPerspective] = useState('')
   const [internalLinks, setInternalLinks] = useState([])
   const [selectedLinks, setSelectedLinks] = useState([])
 
-  // Feedback
   const [feedbackText, setFeedbackText] = useState('')
 
-  // TTS
   const [isSpeaking, setIsSpeaking] = useState(false)
   const [speechSupported, setSpeechSupported] = useState(false)
   const utteranceRef = useRef(null)
 
-  // Voice
-  const [isRecording, setIsRecording] = useState(false)
+  // Voice states — one per field
+  const [isRecordingHinweise, setIsRecordingHinweise] = useState(false)
+  const [isRecordingText, setIsRecordingText] = useState(false)
+  const [isRecordingFeedback, setIsRecordingFeedback] = useState(false)
   const [voiceSupported, setVoiceSupported] = useState(false)
   const recognitionRef = useRef(null)
 
-  // Images
   const [images, setImages] = useState([])
   const [selectedImage, setSelectedImage] = useState(null)
   const [imagesLoading, setImagesLoading] = useState(false)
 
-  // Publish
   const [published, setPublished] = useState(false)
   const [publishedUrl, setPublishedUrl] = useState('')
 
@@ -80,8 +78,10 @@ export default function Home() {
     setIsSpeaking(false)
   }, [])
 
-  const startRecording = useCallback(() => {
+  const startVoice = useCallback((setter, setRecording) => {
     if (!voiceSupported) return
+    // Stop any existing recognition
+    recognitionRef.current?.stop()
     const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition
     const recognition = new SpeechRecognition()
     recognition.lang = 'de-DE'
@@ -89,18 +89,26 @@ export default function Home() {
     recognition.interimResults = true
     recognition.onresult = (e) => {
       const transcript = Array.from(e.results).map(r => r[0].transcript).join('')
-      setFeedbackText(transcript)
+      setter(transcript)
     }
-    recognition.onend = () => setIsRecording(false)
-    recognition.onerror = () => setIsRecording(false)
+    recognition.onend = () => {
+      setIsRecordingHinweise(false)
+      setIsRecordingText(false)
+      setIsRecordingFeedback(false)
+    }
+    recognition.onerror = () => {
+      setIsRecordingHinweise(false)
+      setIsRecordingText(false)
+      setIsRecordingFeedback(false)
+    }
     recognitionRef.current = recognition
     recognition.start()
-    setIsRecording(true)
+    setRecording(true)
   }, [voiceSupported])
 
-  const stopRecording = useCallback(() => {
+  const stopVoice = useCallback((setRecording) => {
     recognitionRef.current?.stop()
-    setIsRecording(false)
+    setRecording(false)
   }, [])
 
   const handleGenerate = async () => {
@@ -108,6 +116,8 @@ export default function Home() {
     setLoading(true)
     let content = ''
     let title = ''
+    let resolvedInputType = inputType
+
     try {
       if (inputType === 'url') {
         if (!urlInput.trim()) throw new Error('Bitte eine URL eingeben')
@@ -127,14 +137,15 @@ export default function Home() {
         content = await extractPdfClientSide(pdfFile)
         title = pdfFile.name
       } else {
-        if (!textInput.trim()) throw new Error('Bitte Text oder Idee eingeben')
+        if (!textInput.trim()) throw new Error('Bitte Text, Idee oder Thema eingeben')
         content = textInput.trim()
         title = ''
+        resolvedInputType = 'direkt'
       }
       setSourceContent(content)
       setSourceTitle(title)
       setLoadingMsg('Artikel wird geschrieben…')
-      await generateArticle(content, title, null, null)
+      await generateArticle(content, title, null, null, resolvedInputType)
     } catch (err) {
       setError(err.message)
     } finally {
@@ -143,16 +154,17 @@ export default function Home() {
     }
   }
 
-  const generateArticle = async (srcContent, srcTitle, feedback, prevArticle) => {
+  const generateArticle = async (srcContent, srcTitle, feedback, prevArticle, resolvedType) => {
     const r = await fetch('/api/generate', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
         sourceContent: srcContent || sourceContent,
         sourceTitle: srcTitle || sourceTitle,
-        inputType,
+        inputType: resolvedType || inputType,
         feedback,
-        previousArticle: prevArticle
+        previousArticle: prevArticle,
+        hinweise: hinweise.trim() || undefined
       })
     })
     const d = await r.json()
@@ -172,7 +184,6 @@ export default function Home() {
     setCurrentStep(1)
   }
 
-  // Apply perspective + links into article
   const handleApplyVoice = async () => {
     if (!editedPerspective.trim() && selectedLinks.length === 0) {
       setCurrentStep(3)
@@ -189,9 +200,7 @@ export default function Home() {
           sourceContent: sourceContent,
           sourceTitle: sourceTitle,
           inputType,
-          feedback: `Baue folgendes Zitat von Harald an passender Stelle in den Artikel ein (als direktes Zitat oder als Übergang): "${editedPerspective}"
-${selectedLinks.length > 0 ? `\nFüge außerdem diese internen Verlinkungen an passenden Stellen als Markdown-Links ein:\n${selectedLinks.map(l => `- [${l.anchor}](${l.url})`).join('\n')}` : ''}
-Behalte sonst alles andere gleich.`,
+          feedback: `Baue folgendes Zitat von Harald an passender Stelle in den Artikel ein: "${editedPerspective}"${selectedLinks.length > 0 ? `\n\nFüge diese internen Verlinkungen als Markdown-Links ein:\n${selectedLinks.map(l => `- [${l.anchor}](${l.url})`).join('\n')}` : ''}\n\nBehalte sonst alles gleich.`,
           previousArticle: article
         })
       })
@@ -214,7 +223,7 @@ Behalte sonst alles andere gleich.`,
     setLoading(true)
     setLoadingMsg('Artikel wird überarbeitet…')
     try {
-      await generateArticle(null, null, feedbackText, article)
+      await generateArticle(null, null, feedbackText, article, inputType)
       setFeedbackText('')
       setCurrentStep(1)
     } catch (err) {
@@ -246,10 +255,7 @@ Behalte sonst alles andere gleich.`,
   }
 
   const handlePublish = async () => {
-    if (!selectedImage) {
-      setError('Bitte zuerst ein Titelbild auswählen.')
-      return
-    }
+    if (!selectedImage) { setError('Bitte zuerst ein Titelbild auswählen.'); return }
     setError('')
     setLoading(true)
     setLoadingMsg('Wird auf Wix veröffentlicht…')
@@ -257,22 +263,11 @@ Behalte sonst alles andere gleich.`,
       const r = await fetch('/api/publish-wix', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          title: seoTitle,
-          article,
-          seoTitle,
-          seoDescription,
-          seoSlug,
-          focusKeyword,
-          imageUrl: selectedImage?.url || null,
-          imageAlt: selectedImage?.alt || null
-        })
+        body: JSON.stringify({ title: seoTitle, article, seoTitle, seoDescription, seoSlug, focusKeyword, imageUrl: selectedImage?.url || null, imageAlt: selectedImage?.alt || null })
       })
       const rawText = await r.text()
       let d = {}
-      try { d = JSON.parse(rawText) } catch (_) {
-        throw new Error('Wix API: Ungültige Antwort — ' + rawText.slice(0, 200))
-      }
+      try { d = JSON.parse(rawText) } catch (_) { throw new Error('Wix API: Ungültige Antwort — ' + rawText.slice(0, 200)) }
       if (!r.ok) throw new Error(d.error + (d.detail ? ': ' + d.detail : ''))
       setPublished(true)
       setPublishedUrl(d.postUrl || '')
@@ -286,25 +281,11 @@ Behalte sonst alles andere gleich.`,
   }
 
   const handleReset = () => {
-    setCurrentStep(0)
-    setArticle('')
-    setFeedbackText('')
-    setImages([])
-    setSelectedImage(null)
-    setPublished(false)
-    setPublishedUrl('')
-    setIteration(0)
-    setError('')
-    setUrlInput('')
-    setTextInput('')
-    setPdfFile(null)
-    setFocusKeyword('')
-    setPerspectives(['', '', ''])
-    setSelectedPerspective(null)
-    setEditedPerspective('')
-    setInternalLinks([])
-    setSelectedLinks([])
-    stopSpeaking()
+    setCurrentStep(0); setArticle(''); setFeedbackText(''); setImages([]); setSelectedImage(null)
+    setPublished(false); setPublishedUrl(''); setIteration(0); setError('')
+    setUrlInput(''); setTextInput(''); setPdfFile(null); setFocusKeyword('')
+    setPerspectives(['', '', '']); setSelectedPerspective(null); setEditedPerspective('')
+    setInternalLinks([]); setSelectedLinks([]); setHinweise(''); stopSpeaking()
   }
 
   const extractPdfClientSide = (file) => new Promise((resolve, reject) => {
@@ -346,12 +327,21 @@ Behalte sonst alles andere gleich.`,
   }
 
   const toggleLink = (link) => {
-    setSelectedLinks(prev =>
-      prev.find(l => l.url === link.url)
-        ? prev.filter(l => l.url !== link.url)
-        : [...prev, link]
-    )
+    setSelectedLinks(prev => prev.find(l => l.url === link.url) ? prev.filter(l => l.url !== link.url) : [...prev, link])
   }
+
+  const VoiceBtn = ({ isRecording, onStart, onStop, small }) => (
+    voiceSupported ? (
+      <button
+        className={`voice-btn ${isRecording ? 'recording' : ''}`}
+        onClick={isRecording ? onStop : onStart}
+        title={isRecording ? 'Aufnahme stoppen' : 'Spracheingabe'}
+        style={small ? { width: '38px', height: '38px', fontSize: '1rem' } : {}}
+      >
+        {isRecording ? '⏹' : '🎙'}
+      </button>
+    ) : null
+  )
 
   return (
     <>
@@ -382,20 +372,72 @@ Behalte sonst alles andere gleich.`,
         {/* STEP 0: INPUT */}
         {currentStep === 0 && !loading && (
           <div className="card">
+
+            {/* Hinweise — optional, immer sichtbar */}
+            <div className="card-title"><span className="icon">💡</span> Hinweise <span style={{ fontSize: '0.75rem', fontWeight: '400', color: 'var(--text-muted)' }}>(optional)</span></div>
+            <div style={{ fontSize: '0.82rem', color: 'var(--text-muted)', marginBottom: '0.6rem' }}>
+              Kontext, Fokus, Zielgruppe oder spezielle Wünsche für diesen Artikel.
+            </div>
+            <div className="feedback-row" style={{ marginBottom: '1.5rem' }}>
+              <textarea
+                placeholder="z.B. &quot;Schreibe aus Sicht eines österreichischen Maschinenbauers&quot; oder &quot;Betone den ROI-Aspekt&quot;…"
+                value={hinweise}
+                onChange={e => setHinweise(e.target.value)}
+                rows={3}
+              />
+              <VoiceBtn
+                isRecording={isRecordingHinweise}
+                onStart={() => startVoice(setHinweise, setIsRecordingHinweise)}
+                onStop={() => stopVoice(setIsRecordingHinweise)}
+              />
+            </div>
+
+            <hr className="divider" style={{ margin: '0 0 1.5rem' }} />
+
+            {/* Quelleingabe */}
             <div className="card-title"><span className="icon">📥</span> Content-Quelle</div>
             <div className="input-tabs">
-              {[{ id: 'url', label: '🔗 URL / Artikel' }, { id: 'pdf', label: '📄 PDF' }, { id: 'text', label: '💭 Idee / Text' }].map(t => (
+              {[
+                { id: 'url', label: '🔗 URL / Artikel' },
+                { id: 'pdf', label: '📄 PDF' },
+                { id: 'text', label: '💭 Direkt schreiben' }
+              ].map(t => (
                 <button key={t.id} className={`input-tab ${inputType === t.id ? 'active' : ''}`} onClick={() => setInputType(t.id)}>{t.label}</button>
               ))}
             </div>
-            {inputType === 'url' && <input type="url" placeholder="https://..." value={urlInput} onChange={e => setUrlInput(e.target.value)} onKeyDown={e => e.key === 'Enter' && handleGenerate()} />}
+
+            {inputType === 'url' && (
+              <input type="url" placeholder="https://..." value={urlInput} onChange={e => setUrlInput(e.target.value)} onKeyDown={e => e.key === 'Enter' && handleGenerate()} />
+            )}
+
             {inputType === 'pdf' && (
               <div className={`upload-area ${pdfFile ? 'dragover' : ''}`} onDrop={handleFileDrop} onDragOver={e => e.preventDefault()} onClick={() => fileInputRef.current?.click()}>
                 <input ref={fileInputRef} type="file" accept=".pdf" onChange={e => setPdfFile(e.target.files[0])} />
                 {pdfFile ? <span style={{ color: 'var(--blue-light)' }}>✅ {pdfFile.name}</span> : <><div style={{ fontSize: '2rem', marginBottom: '0.5rem' }}>📄</div>PDF hier hinziehen oder klicken</>}
               </div>
             )}
-            {inputType === 'text' && <textarea placeholder="Idee, Notiz, eigener Text…" value={textInput} onChange={e => setTextInput(e.target.value)} rows={5} />}
+
+            {inputType === 'text' && (
+              <>
+                <div style={{ fontSize: '0.8rem', color: 'var(--text-muted)', marginBottom: '0.5rem' }}>
+                  Thema, Idee, eigener Text — oder direkt per Stimme einsprechen.
+                </div>
+                <div className="feedback-row">
+                  <textarea
+                    placeholder="z.B. &quot;Schreibe einen Artikel über Preispositionierung für Handwerksbetriebe&quot;…"
+                    value={textInput}
+                    onChange={e => setTextInput(e.target.value)}
+                    rows={5}
+                  />
+                  <VoiceBtn
+                    isRecording={isRecordingText}
+                    onStart={() => startVoice(setTextInput, setIsRecordingText)}
+                    onStop={() => stopVoice(setIsRecordingText)}
+                  />
+                </div>
+              </>
+            )}
+
             <div className="btn-row">
               <button className="btn btn-primary" onClick={handleGenerate} disabled={loading}>✍️ Artikel generieren</button>
             </div>
@@ -414,18 +456,18 @@ Behalte sonst alles andere gleich.`,
             {speechSupported && (
               <div className="tts-bar">
                 <button className="tts-btn" onClick={isSpeaking ? stopSpeaking : speakArticle}>{isSpeaking ? '⏹' : '▶'}</button>
-                <span className="tts-label">{isSpeaking ? 'Artikel wird vorgelesen… klick zum Stoppen' : 'Artikel anhören'}</span>
+                <span className="tts-label">{isSpeaking ? 'Wird vorgelesen… klick zum Stoppen' : 'Artikel anhören'}</span>
               </div>
             )}
             <hr className="divider" />
             <div className="card-title" style={{ marginBottom: '0.75rem' }}><span className="icon">💬</span> Feedback geben</div>
             <div className="feedback-row">
               <textarea placeholder="Was soll anders werden?" value={feedbackText} onChange={e => setFeedbackText(e.target.value)} rows={3} />
-              {voiceSupported && (
-                <button className={`voice-btn ${isRecording ? 'recording' : ''}`} onClick={isRecording ? stopRecording : startRecording}>
-                  {isRecording ? '⏹' : '🎙'}
-                </button>
-              )}
+              <VoiceBtn
+                isRecording={isRecordingFeedback}
+                onStart={() => startVoice(setFeedbackText, setIsRecordingFeedback)}
+                onStop={() => stopVoice(setIsRecordingFeedback)}
+              />
             </div>
             <div className="btn-row">
               <button className="btn btn-primary" onClick={handleFeedback} disabled={loading || !feedbackText.trim()}>🔄 Neue Version</button>
@@ -440,76 +482,41 @@ Behalte sonst alles andere gleich.`,
           <div className="card">
             <div className="card-title"><span className="icon">🎙</span> Deine Stimme</div>
             <div style={{ fontSize: '0.85rem', color: 'var(--text-muted)', marginBottom: '1.25rem' }}>
-              Wähle einen Perspektiv-Vorschlag, bearbeite ihn — und er wird in den Artikel eingebaut.
+              Wähle einen Perspektiv-Vorschlag, bearbeite ihn — er wird in den Artikel eingebaut.
             </div>
-
-            {/* 3 Perspective Options */}
             {perspectives.map((p, i) => (
-              <div
-                key={i}
-                onClick={() => { setSelectedPerspective(i); setEditedPerspective(p) }}
-                style={{
-                  background: selectedPerspective === i ? 'rgba(2, 133, 206, 0.12)' : 'rgba(255,255,255,0.04)',
-                  border: `1px solid ${selectedPerspective === i ? 'var(--blue)' : 'var(--border)'}`,
-                  borderRadius: '10px',
-                  padding: '1rem',
-                  marginBottom: '0.75rem',
-                  cursor: 'pointer',
-                  transition: 'all 0.15s'
-                }}
-              >
+              <div key={i} onClick={() => { setSelectedPerspective(i); setEditedPerspective(p) }}
+                style={{ background: selectedPerspective === i ? 'rgba(2,133,206,0.12)' : 'rgba(255,255,255,0.04)', border: `1px solid ${selectedPerspective === i ? 'var(--blue)' : 'var(--border)'}`, borderRadius: '10px', padding: '1rem', marginBottom: '0.75rem', cursor: 'pointer', transition: 'all 0.15s' }}>
                 <div style={{ fontSize: '0.7rem', fontWeight: '700', textTransform: 'uppercase', color: 'var(--blue-light)', marginBottom: '0.4rem', letterSpacing: '0.06em' }}>
                   {i === 0 ? '💬 Persönlich & direkt' : i === 1 ? '⚡ Provokant & fordernd' : '🏭 Praxis & KMU'}
                 </div>
                 <div style={{ fontSize: '0.88rem', lineHeight: '1.6', color: 'rgba(255,255,255,0.85)' }}>{p || '—'}</div>
               </div>
             ))}
-
-            {/* Edit selected */}
             {selectedPerspective !== null && (
               <div style={{ marginTop: '1rem' }}>
                 <div style={{ fontSize: '0.72rem', fontWeight: '700', textTransform: 'uppercase', color: 'var(--text-muted)', marginBottom: '0.4rem' }}>✏️ Bearbeiten</div>
-                <textarea
-                  value={editedPerspective}
-                  onChange={e => setEditedPerspective(e.target.value)}
-                  rows={4}
-                  style={{ resize: 'vertical' }}
-                />
+                <textarea value={editedPerspective} onChange={e => setEditedPerspective(e.target.value)} rows={4} style={{ resize: 'vertical' }} />
               </div>
             )}
-
-            {/* Internal Links */}
             {internalLinks.length > 0 && (
               <>
                 <hr className="divider" />
                 <div className="card-title" style={{ marginBottom: '0.75rem' }}><span className="icon">🔗</span> Interne Verlinkungen</div>
-                <div style={{ fontSize: '0.82rem', color: 'var(--text-muted)', marginBottom: '0.75rem' }}>Wähle welche Artikel verlinkt werden sollen:</div>
                 {internalLinks.map((link, i) => (
-                  <div
-                    key={i}
-                    onClick={() => toggleLink(link)}
-                    style={{
-                      background: selectedLinks.find(l => l.url === link.url) ? 'rgba(2, 133, 206, 0.12)' : 'rgba(255,255,255,0.04)',
-                      border: `1px solid ${selectedLinks.find(l => l.url === link.url) ? 'var(--blue)' : 'var(--border)'}`,
-                      borderRadius: '8px',
-                      padding: '0.75rem 1rem',
-                      marginBottom: '0.5rem',
-                      cursor: 'pointer',
-                      transition: 'all 0.15s'
-                    }}
-                  >
+                  <div key={i} onClick={() => toggleLink(link)}
+                    style={{ background: selectedLinks.find(l => l.url === link.url) ? 'rgba(2,133,206,0.12)' : 'rgba(255,255,255,0.04)', border: `1px solid ${selectedLinks.find(l => l.url === link.url) ? 'var(--blue)' : 'var(--border)'}`, borderRadius: '8px', padding: '0.75rem 1rem', marginBottom: '0.5rem', cursor: 'pointer', transition: 'all 0.15s' }}>
                     <div style={{ fontSize: '0.82rem', color: 'var(--white)', marginBottom: '0.2rem' }}>📄 {link.title}</div>
                     <div style={{ fontSize: '0.75rem', color: 'var(--blue-light)' }}>Ankertext: „{link.anchor}"</div>
                   </div>
                 ))}
               </>
             )}
-
             <div className="btn-row" style={{ marginTop: '1.5rem' }}>
               <button className="btn btn-primary" onClick={handleApplyVoice} disabled={loading}>
                 {editedPerspective.trim() || selectedLinks.length > 0 ? '✅ Einbauen & weiter zu Bild' : '⏭ Überspringen → Bild'}
               </button>
-              <button className="btn btn-secondary" onClick={() => setCurrentStep(1)}>← Zurück zum Artikel</button>
+              <button className="btn btn-secondary" onClick={() => setCurrentStep(1)}>← Zurück</button>
             </div>
           </div>
         )}
@@ -530,50 +537,35 @@ Behalte sonst alles andere gleich.`,
                     </div>
                   ))}
                 </div>
-                {selectedImage && (
-                  <div className="image-credit">
-                    Foto: <a href={selectedImage.authorUrl} target="_blank" rel="noopener noreferrer" style={{ color: 'var(--blue-light)' }}>{selectedImage.author}</a> via Unsplash
-                  </div>
-                )}
+                {selectedImage && <div className="image-credit">Foto: <a href={selectedImage.authorUrl} target="_blank" rel="noopener noreferrer" style={{ color: 'var(--blue-light)' }}>{selectedImage.author}</a> via Unsplash</div>}
               </>
             )}
-
             <hr className="divider" />
-
             <div className="card-title" style={{ marginBottom: '1rem' }}><span className="icon">🔍</span> SEO bearbeiten</div>
-
             <div style={{ marginBottom: '1rem' }}>
               <div style={{ fontSize: '0.72rem', fontWeight: '700', textTransform: 'uppercase', letterSpacing: '0.06em', color: 'var(--text-muted)', marginBottom: '0.4rem' }}>SEO Titel</div>
               <input type="text" value={seoTitle} onChange={e => setSeoTitle(e.target.value)} placeholder="SEO Titel…" />
             </div>
-
             <div style={{ marginBottom: '1rem' }}>
               <div style={{ fontSize: '0.72rem', fontWeight: '700', textTransform: 'uppercase', letterSpacing: '0.06em', color: 'var(--text-muted)', marginBottom: '0.4rem' }}>Meta Description</div>
               <textarea value={seoDescription} onChange={e => setSeoDescription(e.target.value)} rows={3} placeholder="Meta Description…" />
             </div>
-
             <div style={{ marginBottom: '1rem' }}>
               <div style={{ fontSize: '0.72rem', fontWeight: '700', textTransform: 'uppercase', letterSpacing: '0.06em', color: 'var(--text-muted)', marginBottom: '0.4rem' }}>URL Slug</div>
               <input type="text" value={seoSlug} onChange={e => setSeoSlug(e.target.value.toLowerCase().replace(/\s+/g, '-'))} placeholder="url-slug" style={{ fontFamily: 'monospace' }} />
             </div>
-
             <div style={{ marginBottom: '1.5rem' }}>
               <div style={{ fontSize: '0.72rem', fontWeight: '700', textTransform: 'uppercase', letterSpacing: '0.06em', color: 'var(--text-muted)', marginBottom: '0.4rem' }}>🎯 Fokus-Keyword</div>
               <input type="text" value={focusKeyword} onChange={e => setFocusKeyword(e.target.value)} placeholder="z.B. Markenpositionierung KMU" />
             </div>
-
-            {/* Google Snippet Preview */}
             <div style={{ background: 'white', borderRadius: '8px', padding: '1rem 1.25rem', marginBottom: '1.5rem' }}>
               <div style={{ fontSize: '0.65rem', color: '#888', marginBottom: '0.4rem' }}>Google Vorschau</div>
               <div style={{ color: '#1a0dab', fontSize: '1rem', fontWeight: '600', marginBottom: '0.15rem', fontFamily: 'arial, sans-serif' }}>{seoTitle || 'SEO Titel…'}</div>
               <div style={{ color: '#006621', fontSize: '0.78rem', marginBottom: '0.2rem', fontFamily: 'arial, sans-serif' }}>branddoc.at › blog › {seoSlug || 'url-slug'}</div>
               <div style={{ color: '#545454', fontSize: '0.82rem', fontFamily: 'arial, sans-serif', lineHeight: '1.4' }}>{seoDescription || 'Meta Description…'}</div>
             </div>
-
             <div className="btn-row">
-              <button className="btn btn-publish" onClick={handlePublish} disabled={loading || !selectedImage}>
-                🚀 Jetzt auf Wix veröffentlichen
-              </button>
+              <button className="btn btn-publish" onClick={handlePublish} disabled={loading || !selectedImage}>🚀 Jetzt auf Wix veröffentlichen</button>
             </div>
             {!selectedImage && <div style={{ fontSize: '0.75rem', color: 'var(--text-muted)', textAlign: 'center', marginTop: '0.5rem' }}>Bitte zuerst ein Titelbild auswählen.</div>}
           </div>
@@ -586,9 +578,7 @@ Behalte sonst alles andere gleich.`,
               <div className="big-check">🎉</div>
               <h2>Artikel ist live!</h2>
               <p>Dein Blogartikel wurde erfolgreich auf branddoc.at veröffentlicht.</p>
-              {publishedUrl && (
-                <a href={publishedUrl} target="_blank" rel="noopener noreferrer" className="btn btn-secondary" style={{ display: 'inline-flex', marginBottom: '1rem' }}>🌐 Artikel ansehen</a>
-              )}
+              {publishedUrl && <a href={publishedUrl} target="_blank" rel="noopener noreferrer" className="btn btn-secondary" style={{ display: 'inline-flex', marginBottom: '1rem' }}>🌐 Artikel ansehen</a>}
               <br />
               <button className="btn btn-primary" onClick={handleReset} style={{ marginTop: '0.75rem' }}>✍️ Nächsten Artikel schreiben</button>
             </div>
