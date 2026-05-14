@@ -31,6 +31,7 @@ export default function Home() {
   const [selectedLinks, setSelectedLinks] = useState([])
 
   const [feedbackText, setFeedbackText] = useState('')
+  const [publishMode, setPublishMode] = useState('live') // 'live' or 'draft'
 
   const [isSpeaking, setIsSpeaking] = useState(false)
   const [speechSupported, setSpeechSupported] = useState(false)
@@ -184,37 +185,39 @@ export default function Home() {
     setCurrentStep(1)
   }
 
-  const handleApplyVoice = async () => {
-    if (!editedPerspective.trim() && selectedLinks.length === 0) {
-      setCurrentStep(3)
-      handleLoadImages()
-      return
+  const handleApplyVoice = () => {
+    let updatedArticle = article
+
+    // Insert quote directly after 2nd paragraph — no extra API call
+    if (editedPerspective.trim()) {
+      const lines = article.split('\n')
+      let paragraphCount = 0
+      let insertIndex = lines.length
+
+      for (let i = 0; i < lines.length; i++) {
+        if (lines[i].trim() === '' && i > 0 && lines[i - 1].trim() !== '') {
+          paragraphCount++
+          if (paragraphCount === 2) {
+            insertIndex = i + 1
+            break
+          }
+        }
+      }
+
+      const quoteLine = `\n„${editedPerspective}"\n— Harald Sturm\n`
+      lines.splice(insertIndex, 0, quoteLine)
+      updatedArticle = lines.join('\n')
     }
-    setLoading(true)
-    setLoadingMsg('Deine Stimme wird eingebaut…')
-    try {
-      const r = await fetch('/api/generate', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          sourceContent: sourceContent,
-          sourceTitle: sourceTitle,
-          inputType,
-          feedback: `Baue folgendes Zitat von Harald an passender Stelle in den Artikel ein: "${editedPerspective}"${selectedLinks.length > 0 ? `\n\nFüge diese internen Verlinkungen als Markdown-Links ein:\n${selectedLinks.map(l => `- [${l.anchor}](${l.url})`).join('\n')}` : ''}\n\nBehalte sonst alles gleich.`,
-          previousArticle: article
-        })
-      })
-      const d = await r.json()
-      if (!r.ok) throw new Error(d.error)
-      setArticle(d.article)
-      setCurrentStep(3)
-      handleLoadImages()
-    } catch (err) {
-      setError(err.message)
-    } finally {
-      setLoading(false)
-      setLoadingMsg('')
+
+    // Add internal links as references at end of article
+    if (selectedLinks.length > 0) {
+      const linkBlock = '\n\n**Weiterführende Artikel:**\n' + selectedLinks.map(l => `- [${l.anchor}](${l.url})`).join('\n')
+      updatedArticle = updatedArticle + linkBlock
     }
+
+    setArticle(updatedArticle)
+    setCurrentStep(3)
+    handleLoadImages()
   }
 
   const handleFeedback = async () => {
@@ -258,12 +261,12 @@ export default function Home() {
     if (!selectedImage) { setError('Bitte zuerst ein Titelbild auswählen.'); return }
     setError('')
     setLoading(true)
-    setLoadingMsg('Wird auf Wix veröffentlicht…')
+    setLoadingMsg(publishMode === 'draft' ? 'Wird als Entwurf gespeichert…' : 'Wird auf Wix veröffentlicht…')
     try {
       const r = await fetch('/api/publish-wix', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ title: seoTitle, article, seoTitle, seoDescription, seoSlug, focusKeyword, imageUrl: selectedImage?.url || null, imageAlt: selectedImage?.alt || null })
+        body: JSON.stringify({ title: seoTitle, article, seoTitle, seoDescription, seoSlug, focusKeyword, imageUrl: selectedImage?.url || null, imageAlt: selectedImage?.alt || null, saveAsDraft: publishMode === 'draft' })
       })
       const rawText = await r.text()
       let d = {}
@@ -564,8 +567,26 @@ export default function Home() {
               <div style={{ color: '#006621', fontSize: '0.78rem', marginBottom: '0.2rem', fontFamily: 'arial, sans-serif' }}>branddoc.at › blog › {seoSlug || 'url-slug'}</div>
               <div style={{ color: '#545454', fontSize: '0.82rem', fontFamily: 'arial, sans-serif', lineHeight: '1.4' }}>{seoDescription || 'Meta Description…'}</div>
             </div>
+            {/* Publish Mode Toggle */}
+            <div style={{ display: 'flex', gap: '10px', marginBottom: '1rem' }}>
+              <button
+                onClick={() => setPublishMode('live')}
+                style={{ flex: 1, padding: '0.75rem', borderRadius: '8px', border: `2px solid ${publishMode === 'live' ? 'var(--blue)' : 'var(--border)'}`, background: publishMode === 'live' ? 'rgba(2,133,206,0.15)' : 'transparent', color: publishMode === 'live' ? 'var(--white)' : 'var(--text-muted)', cursor: 'pointer', fontFamily: 'var(--font-display)', fontWeight: '700', fontSize: '0.85rem', transition: 'all 0.15s' }}
+              >
+                🚀 Direkt live
+              </button>
+              <button
+                onClick={() => setPublishMode('draft')}
+                style={{ flex: 1, padding: '0.75rem', borderRadius: '8px', border: `2px solid ${publishMode === 'draft' ? 'var(--blue)' : 'var(--border)'}`, background: publishMode === 'draft' ? 'rgba(2,133,206,0.15)' : 'transparent', color: publishMode === 'draft' ? 'var(--white)' : 'var(--text-muted)', cursor: 'pointer', fontFamily: 'var(--font-display)', fontWeight: '700', fontSize: '0.85rem', transition: 'all 0.15s' }}
+              >
+                📝 Als Entwurf
+              </button>
+            </div>
+
             <div className="btn-row">
-              <button className="btn btn-publish" onClick={handlePublish} disabled={loading || !selectedImage}>🚀 Jetzt auf Wix veröffentlichen</button>
+              <button className="btn btn-publish" onClick={handlePublish} disabled={loading || !selectedImage}>
+                {publishMode === 'draft' ? '📝 Als Entwurf speichern' : '🚀 Jetzt auf Wix veröffentlichen'}
+              </button>
             </div>
             {!selectedImage && <div style={{ fontSize: '0.75rem', color: 'var(--text-muted)', textAlign: 'center', marginTop: '0.5rem' }}>Bitte zuerst ein Titelbild auswählen.</div>}
           </div>
@@ -576,8 +597,8 @@ export default function Home() {
           <div className="card">
             <div className="publish-success">
               <div className="big-check">🎉</div>
-              <h2>Artikel ist live!</h2>
-              <p>Dein Blogartikel wurde erfolgreich auf branddoc.at veröffentlicht.</p>
+              <h2>{publishMode === 'draft' ? 'Entwurf gespeichert!' : 'Artikel ist live!'}</h2>
+              <p>{publishMode === 'draft' ? 'Dein Artikel wurde als Entwurf auf Wix gespeichert.' : 'Dein Blogartikel wurde erfolgreich auf branddoc.at veröffentlicht.'}</p>
               {publishedUrl && <a href={publishedUrl} target="_blank" rel="noopener noreferrer" className="btn btn-secondary" style={{ display: 'inline-flex', marginBottom: '1rem' }}>🌐 Artikel ansehen</a>}
               <br />
               <button className="btn btn-primary" onClick={handleReset} style={{ marginTop: '0.75rem' }}>✍️ Nächsten Artikel schreiben</button>
