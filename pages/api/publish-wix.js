@@ -1,7 +1,7 @@
 export default async function handler(req, res) {
   if (req.method !== 'POST') return res.status(405).end()
 
-  const { title, article, seoTitle, seoDescription, seoSlug, imageUrl, focusKeyword } = req.body
+  const { title, article, seoTitle, seoDescription, seoSlug, imageUrl, focusKeyword, saveAsDraft } = req.body
 
   // Build rich content nodes
   const contentNodes = []
@@ -108,6 +108,11 @@ export default async function handler(req, res) {
     }
 
     const draftId = draftData.draftPost?.id
+
+    // If saving as draft — stop here
+    if (saveAsDraft) {
+      return res.json({ success: true, postId: draftId, postUrl: null })
+    }
 
     // Step 2: Publish
     const publishResponse = await fetch(`https://www.wixapis.com/blog/v3/draft-posts/${draftId}/publish`, {
