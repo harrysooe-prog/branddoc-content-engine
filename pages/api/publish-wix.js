@@ -35,7 +35,7 @@ export default async function handler(req, res) {
             type: 'TEXT',
             textData: {
               text: trimmed,
-              decorations: [{ type: 'ITALIC', italicData: { value: true } }]
+              decorations: [{ type: 'ITALIC' }]
             }
           }]
         }]
@@ -52,7 +52,7 @@ export default async function handler(req, res) {
     emptyParagraph,
     { type: 'DIVIDER', dividerData: {} },
     emptyParagraph,
-    { type: 'PARAGRAPH', nodes: [{ type: 'TEXT', textData: { text: 'Hallo, ich bin Harald Sturm 👋 Ich bin Marken-Arzt.', decorations: [{ type: 'BOLD', boldData: { value: true } }] } }] },
+    { type: 'PARAGRAPH', nodes: [{ type: 'TEXT', textData: { text: 'Hallo, ich bin Harald Sturm 👋 Ich bin Marken-Arzt.', decorations: [{ type: 'BOLD' }] } }] },
     emptyParagraph,
     { type: 'PARAGRAPH', nodes: [{ type: 'TEXT', textData: { text: 'Marken brauchen keinen Stylisten – sie brauchen manchmal einen Arzt. Ich diagnostiziere, warum starke Unternehmen unter ihrem Wert wahrgenommen werden, und begleite sie – beratend oder als Fractional CMO – dabei, das dauerhaft zu ändern.' } }] },
     emptyParagraph,
