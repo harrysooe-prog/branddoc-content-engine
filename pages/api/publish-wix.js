@@ -11,33 +11,59 @@ export default async function handler(req, res) {
   const allLines = article.split('\n').filter(l => l.trim())
   const firstIsH1 = allLines[0]?.trim().startsWith('# ') && !allLines[0]?.trim().startsWith('## ')
   const lines = firstIsH1 ? allLines.slice(1) : allLines
+  const emptyParagraph = { type: 'PARAGRAPH', nodes: [{ type: 'TEXT', textData: { text: '' } }] }
+
   for (const line of lines) {
     const trimmed = line.trim()
     if (trimmed.startsWith('### ')) {
+      contentNodes.push(emptyParagraph)
       contentNodes.push({
         type: 'HEADING',
         headingData: { level: 3 },
         nodes: [{ type: 'TEXT', textData: { text: trimmed.slice(4) } }]
       })
+      contentNodes.push(emptyParagraph)
     } else if (trimmed.startsWith('## ')) {
+      contentNodes.push(emptyParagraph)
       contentNodes.push({
         type: 'HEADING',
         headingData: { level: 2 },
         nodes: [{ type: 'TEXT', textData: { text: trimmed.slice(3) } }]
       })
+      contentNodes.push(emptyParagraph)
     } else if (trimmed.startsWith('# ')) {
+      contentNodes.push(emptyParagraph)
       contentNodes.push({
         type: 'HEADING',
         headingData: { level: 1 },
         nodes: [{ type: 'TEXT', textData: { text: trimmed.slice(2) } }]
       })
+      contentNodes.push(emptyParagraph)
     } else {
       contentNodes.push({
         type: 'PARAGRAPH',
         nodes: [{ type: 'TEXT', textData: { text: trimmed } }]
       })
+      contentNodes.push(emptyParagraph)
     }
   }
+
+  // Fixed author bio — appears at end of every article
+  contentNodes.push(
+    { type: 'DIVIDER', dividerData: {} },
+    {
+      type: 'PARAGRAPH',
+      nodes: [{ type: 'TEXT', textData: { text: 'Hallo, ich bin Harald Sturm 👋 Ich bin Marken-Arzt.', decorations: [{ type: 'BOLD', boldData: { value: true } }] } }]
+    },
+    {
+      type: 'PARAGRAPH',
+      nodes: [{ type: 'TEXT', textData: { text: 'Marken brauchen keinen Stylisten – sie brauchen manchmal einen Arzt. Ich diagnostiziere, warum starke Unternehmen unter ihrem Wert wahrgenommen werden, und begleite sie – beratend oder als Fractional CMO – dabei, das dauerhaft zu ändern.' } }]
+    },
+    {
+      type: 'PARAGRAPH',
+      nodes: [{ type: 'TEXT', textData: { text: 'Meine These: Fast jedes Unternehmen ist besser als sein Marktauftritt. Wer seine Marke alle zwei Jahre neu erfindet, zahlt jedes Mal die Anlaufkosten – und erntet nie den Zinseszins.' } }]
+    }
+  )
 
   const draftPayload = {
     draftPost: {
