@@ -13,12 +13,17 @@ const EXISTING_ARTICLES = [
     title: 'Was KMU von Budweisers WM-Kampagne 2026 lernen können',
     url: 'https://www.branddoc.at/post/was-kmu-von-budweisers-wm-kampagne-2026-lernen-können',
     topics: 'KMU Markenarbeit, emotionale Werbung, Budweiser'
+  },
+  {
+    title: 'Marke gehört in die Geschäftsführung — nicht ins Marketing',
+    url: 'https://www.branddoc.at/post/marke-gehört-in-die-geschäftsführung-nicht-ins-marketing',
+    topics: 'Markenstrategie, Führung, Chefsache, Positionierung'
   }
 ]
 
 export default async function handler(req, res) {
   if (req.method !== 'POST') return res.status(405).end()
-  const { sourceContent, sourceTitle, feedback, previousArticle, inputType } = req.body
+  const { sourceContent, sourceTitle, feedback, previousArticle, inputType, hinweise } = req.body
 
   const articleList = EXISTING_ARTICLES.map(a => `- "${a.title}" (${a.url}) — Themen: ${a.topics}`).join('\n')
 
@@ -38,17 +43,18 @@ INHALTSTREUE:
 - Bleibe eng am Quellinhalt. Übernimm alle zentralen Fakten, Zahlen, Zitate und Argumente.
 - Erfinde KEINE neuen Fakten oder Zahlen die nicht in der Quelle stehen.
 - Adaption in Haralds Stimme — nicht Neuerfindung des Inhalts.
+- Bei Direktartikeln (ohne Quelle): schreibe aus Haralds Expertise heraus, konkret und praxisnah.
 
 PERSPEKTIVE & FRAMING:
-- Jeder Artikel braucht eine klare Haltung von Harald — nicht nur Analyse, sondern Meinung.
-- Mindestens ein Moment im Artikel der zeigt was der CEO verliert wenn er nichts ändert.
+- Jeder Artikel braucht eine klare Haltung — nicht nur Analyse, sondern Meinung.
+- Mindestens ein Moment der zeigt was der CEO verliert wenn er nichts ändert.
 - Framing: Perspektivenwechsel statt "was du lernen kannst".
 
 BLOGARTIKEL-FORMAT:
 - Länge: 600–900 Wörter
-- Headline: provokativ, klar, kein Clickbait
+- Headline: provokativ, klar, kein Clickbait — als H1 (# Headline)
 - Lead: erster Satz muss sofort fesseln
-- Struktur: Fließtext, max. 2–3 Zwischenüberschriften (mit ## markiert)
+- Struktur: Fließtext, max. 2–3 Zwischenüberschriften (## Überschrift)
 - Abschluss: Loss-Framing — was verliert der CEO wenn er nichts ändert?
 - Schreibe IMMER auf Deutsch.
 
@@ -59,11 +65,11 @@ SEO_DESCRIPTION: (max 155 Zeichen)
 SEO_SLUG: (URL-freundlich, Deutsch, Bindestriche)
 UNSPLASH_QUERY: (2–3 englische Keywords)
 FOCUS_KEYWORD: (1–3 deutsche Keywords)
-PERSPECTIVE_1: (2-3 Sätze — Haralds direkte, persönliche Meinung zum Thema. Ich-Form. Konsequent und klar.)
-PERSPECTIVE_2: (2-3 Sätze — provokanter, fordernder. Spricht CEO direkt an. Du-Form.)
-PERSPECTIVE_3: (2-3 Sätze — konkreter Praxisbezug zu KMU/Mittelstand. Mit einer Beobachtung aus der Beratungspraxis.)
-INTERNAL_LINK_1: TITLE|URL|ANKERTEXT (wähle aus der Liste den thematisch passendsten Artikel)
-INTERNAL_LINK_2: TITLE|URL|ANKERTEXT (zweiten passenden Artikel, nur wenn wirklich relevant)
+PERSPECTIVE_1: (2-3 Sätze — Haralds direkte persönliche Meinung, Ich-Form)
+PERSPECTIVE_2: (2-3 Sätze — provokant, CEO direkt angesprochen, Du-Form)
+PERSPECTIVE_3: (2-3 Sätze — konkreter KMU-Praxisbezug, Beobachtung aus der Beratung)
+INTERNAL_LINK_1: TITLE|URL|ANKERTEXT
+INTERNAL_LINK_2: TITLE|URL|ANKERTEXT
 
 Bestehende Artikel auf branddoc.at:
 ${articleList}`
@@ -71,10 +77,13 @@ ${articleList}`
   let userMessage = ''
   if (feedback && previousArticle) {
     userMessage = `Hier ist der bisherige Blogartikel:\n\n${previousArticle}\n\n---\n\nHaralds Feedback:\n${feedback}\n\nBitte überarbeite den Artikel entsprechend. Behalte was gut ist, ändere was Harald kritisiert hat.`
+  } else if (inputType === 'direkt') {
+    userMessage = `Schreibe einen Blogartikel für brandDOC.at basierend auf diesem Thema/Prompt:\n\n${sourceContent}${hinweise ? `\n\nZusätzliche Hinweise von Harald:\n${hinweise}` : ''}`
   } else {
-    userMessage = `Schreibe einen Blogartikel für brandDOC.at basierend auf diesem ${inputType === 'url' ? 'Artikel' : inputType === 'pdf' ? 'Dokument' : 'Inhalt'}.
+    userMessage = `Schreibe einen Blogartikel für brandDOC.at basierend auf diesem ${inputType === 'url' ? 'Artikel' : 'Dokument'}.
 
 WICHTIG: Bleibe eng an den Fakten, Zahlen, Zitaten und Argumenten der Quelle. Adaptiere in Haralds Stimme — erfinde nichts dazu.
+${hinweise ? `\nZusätzliche Hinweise von Harald: ${hinweise}` : ''}
 
 ${sourceTitle ? `Titel/Quelle: ${sourceTitle}\n\n` : ''}Quellinhalt:
 ${sourceContent}`
@@ -115,29 +124,17 @@ ${sourceContent}`
     const perspective2 = seoBlock.match(/PERSPECTIVE_2:\s*(.+)/)?.[1]?.trim() || ''
     const perspective3 = seoBlock.match(/PERSPECTIVE_3:\s*(.+)/)?.[1]?.trim() || ''
 
-    // Parse internal links
     const internalLinks = []
     const link1Match = seoBlock.match(/INTERNAL_LINK_1:\s*(.+)/)
     const link2Match = seoBlock.match(/INTERNAL_LINK_2:\s*(.+)/)
     for (const match of [link1Match, link2Match]) {
       if (match) {
-        const parts = match[1].split('|')
-        if (parts.length === 3) {
-          internalLinks.push({ title: parts[0].trim(), url: parts[1].trim(), anchor: parts[2].trim() })
-        }
+        const p = match[1].split('|')
+        if (p.length === 3) internalLinks.push({ title: p[0].trim(), url: p[1].trim(), anchor: p[2].trim() })
       }
     }
 
-    res.json({
-      article: articleText,
-      seoTitle,
-      seoDescription,
-      seoSlug,
-      unsplashQuery,
-      focusKeyword,
-      perspectives: [perspective1, perspective2, perspective3].filter(Boolean),
-      internalLinks
-    })
+    res.json({ article: articleText, seoTitle, seoDescription, seoSlug, unsplashQuery, focusKeyword, perspectives: [perspective1, perspective2, perspective3].filter(Boolean), internalLinks })
   } catch (err) {
     res.status(500).json({ error: 'Generierung fehlgeschlagen: ' + err.message })
   }
