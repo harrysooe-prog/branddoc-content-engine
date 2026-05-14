@@ -7,7 +7,10 @@ export default async function handler(req, res) {
   const contentNodes = []
 
   // Add article paragraphs — parse headings
-  const lines = article.split('\n').filter(l => l.trim())
+  // Skip first line if it's an H1 (Wix already shows post title separately)
+  const allLines = article.split('\n').filter(l => l.trim())
+  const firstIsH1 = allLines[0]?.trim().startsWith('# ') && !allLines[0]?.trim().startsWith('## ')
+  const lines = firstIsH1 ? allLines.slice(1) : allLines
   for (const line of lines) {
     const trimmed = line.trim()
     if (trimmed.startsWith('### ')) {
