@@ -2,6 +2,9 @@ import { useState, useRef, useEffect, useCallback } from 'react'
 import Head from 'next/head'
 
 const STEPS = ['Input', 'Artikel', 'Stimme', 'Bild', 'Publish']
+const MAX_IMAGES = 10
+const MAX_PX = 1500       // max Breite/Höhe nach Komprimierung
+const JPEG_QUALITY = 0.80 // 80% JPEG-Qualität — gut für Claude, klein im Speicher
 
 export default function Home() {
   const [currentStep, setCurrentStep] = useState(0)
@@ -9,7 +12,7 @@ export default function Home() {
   const [urlInput, setUrlInput] = useState('')
   const [textInput, setTextInput] = useState('')
   const [pdfFile, setPdfFile] = useState(null)
-  const [imageFiles, setImageFiles] = useState([])          // NEW: screenshot/photo files
+  const [imageFiles, setImageFiles] = useState([])
   const [hinweise, setHinweise] = useState('')
   const [loading, setLoading] = useState(false)
   const [loadingMsg, setLoadingMsg] = useState('')
@@ -52,7 +55,7 @@ export default function Home() {
   const [publishedUrl, setPublishedUrl] = useState('')
 
   const fileInputRef = useRef(null)
-  const imageInputRef = useRef(null)               // NEW: ref for image file input
+  const imageInputRef = useRef(null)
 
   useEffect(() => {
     setSpeechSupported(typeof window !== 'undefined' && 'speechSynthesis' in window)
@@ -112,39 +115,64 @@ export default function Home() {
     setRecording(false)
   }, [])
 
-  // NEW: Convert a File to base64 + mediaType
-  const fileToBase64 = (file) => new Promise((resolve, reject) => {
+  // ── Canvas-Komprimierung ──────────────────────────────────────────────────
+  // Lädt ein File-Objekt als Image, skaliert auf max MAX_PX und exportiert
+  // als JPEG mit JPEG_QUALITY. Gibt { data: base64string, mediaType } zurück.
+  const compressImage = (file) => new Promise((resolve, reject) => {
     const reader = new FileReader()
-    reader.onload = (e) => {
-      const data = e.target.result.split(',')[1]
-      resolve({ data, mediaType: file.type || 'image/jpeg' })
-    }
     reader.onerror = () => reject(new Error('Bild konnte nicht gelesen werden'))
+    reader.onload = (e) => {
+      const img = new Image()
+      img.onerror = () => reject(new Error('Bild konnte nicht dekodiert werden'))
+      img.onload = () => {
+        // Zielgröße berechnen
+        let { width, height } = img
+        if (width > MAX_PX || height > MAX_PX) {
+          if (width >= height) { height = Math.round(height * MAX_PX / width); width = MAX_PX }
+          else                 { width = Math.round(width * MAX_PX / height); height = MAX_PX }
+        }
+        const canvas = document.createElement('canvas')
+        canvas.width = width
+        canvas.height = height
+        const ctx = canvas.getContext('2d')
+        ctx.drawImage(img, 0, 0, width, height)
+        // Immer als JPEG exportieren (auch PNG-Input) — kleinste Dateigröße
+        const dataUrl = canvas.toDataURL('image/jpeg', JPEG_QUALITY)
+        const data = dataUrl.split(',')[1]
+        resolve({ data, mediaType: 'image/jpeg' })
+      }
+      img.src = e.target.result
+    }
     reader.readAsDataURL(file)
   })
+  // ─────────────────────────────────────────────────────────────────────────
 
-  // NEW: Validate + add image files (max 5, images only)
+  // Validate + add image files (max MAX_IMAGES)
   const handleImageSelect = (files) => {
     const validTypes = ['image/jpeg', 'image/png', 'image/webp', 'image/gif']
     const valid = files.filter(f => validTypes.includes(f.type))
-    if (valid.length < files.length) {
-      setError('Nur JPG, PNG, WEBP und GIF werden unterstützt.')
-    }
+    if (valid.length < files.length) setError('Nur JPG, PNG, WEBP und GIF werden unterstützt.')
     setImageFiles(prev => {
       const combined = [...prev, ...valid]
-      if (combined.length > 5) {
-        setError('Maximal 5 Bilder erlaubt.')
-        return combined.slice(0, 5)
+      if (combined.length > MAX_IMAGES) {
+        setError(`Maximal ${MAX_IMAGES} Bilder erlaubt.`)
+        return combined.slice(0, MAX_IMAGES)
       }
       return combined
     })
   }
 
-  // NEW: Drag & drop for images
   const handleImageDrop = (e) => {
     e.preventDefault()
-    const files = Array.from(e.dataTransfer.files)
-    handleImageSelect(files)
+    handleImageSelect(Array.from(e.dataTransfer.files))
+  }
+
+  // Normalize URL — add https:// if missing
+  const normalizeUrl = (raw) => {
+    const trimmed = raw.trim()
+    if (!trimmed) return ''
+    if (/^https?:\/\//i.test(trimmed)) return trimmed
+    return 'https://' + trimmed
   }
 
   const handleGenerate = async () => {
@@ -157,43 +185,50 @@ export default function Home() {
     try {
       if (inputType === 'url') {
         if (!urlInput.trim()) throw new Error('Bitte eine URL eingeben')
+        const url = normalizeUrl(urlInput)
+        setUrlInput(url)
         setLoadingMsg('URL wird geladen…')
         const r = await fetch('/api/fetch-url', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ url: urlInput.trim() })
+          body: JSON.stringify({ url })
         })
         const d = await r.json()
         if (!r.ok) throw new Error(d.error)
         content = d.content
         title = d.title
+
       } else if (inputType === 'pdf') {
         if (!pdfFile) throw new Error('Bitte ein PDF hochladen')
         setLoadingMsg('PDF wird gelesen…')
         content = await extractPdfClientSide(pdfFile)
         title = pdfFile.name
+
       } else if (inputType === 'images') {
-        // NEW: image/screenshot path
         if (imageFiles.length === 0) throw new Error('Bitte mindestens ein Foto oder Screenshot hochladen')
-        setLoadingMsg(`${imageFiles.length} Bild(er) werden analysiert…`)
-        const base64Images = await Promise.all(imageFiles.map(fileToBase64))
+        setLoadingMsg(`${imageFiles.length} Bild(er) werden komprimiert…`)
+        // Komprimierung — alle parallel
+        const compressed = await Promise.all(imageFiles.map(compressImage))
         content = `[${imageFiles.length} Bild(er) hochgeladen]`
         title = 'Foto-/Screenshot-Analyse'
         setSourceContent(content)
         setSourceTitle(title)
         setLoadingMsg('Artikel wird aus Bildern geschrieben…')
-        await generateArticle(content, title, null, null, 'images', base64Images)
-        return  // generateArticle handles setCurrentStep
+        await generateArticle(content, title, null, null, 'images', compressed)
+        return
+
       } else {
         if (!textInput.trim()) throw new Error('Bitte Text, Idee oder Thema eingeben')
         content = textInput.trim()
         title = ''
         resolvedInputType = 'direkt'
       }
+
       setSourceContent(content)
       setSourceTitle(title)
       setLoadingMsg('Artikel wird geschrieben…')
       await generateArticle(content, title, null, null, resolvedInputType)
+
     } catch (err) {
       setError(err.message)
     } finally {
@@ -202,7 +237,6 @@ export default function Home() {
     }
   }
 
-  // NEW: added optional `images` param (array of {data, mediaType})
   const generateArticle = async (srcContent, srcTitle, feedback, prevArticle, resolvedType, images) => {
     const r = await fetch('/api/generate', {
       method: 'POST',
@@ -214,7 +248,7 @@ export default function Home() {
         feedback,
         previousArticle: prevArticle,
         hinweise: hinweise.trim() || undefined,
-        images: images || undefined           // NEW: pass images to API
+        images: images || undefined
       })
     })
     const d = await r.json()
@@ -241,17 +275,12 @@ export default function Home() {
       const lines = article.split('\n')
       let paragraphCount = 0
       let insertIndex = lines.length
-
       for (let i = 0; i < lines.length; i++) {
         if (lines[i].trim() === '' && i > 0 && lines[i - 1].trim() !== '') {
           paragraphCount++
-          if (paragraphCount === 2) {
-            insertIndex = i + 1
-            break
-          }
+          if (paragraphCount === 2) { insertIndex = i + 1; break }
         }
       }
-
       const quoteLine = `\n„${editedPerspective}"\n— Harald Sturm\n`
       lines.splice(insertIndex, 0, quoteLine)
       updatedArticle = lines.join('\n')
@@ -336,7 +365,7 @@ export default function Home() {
     setUrlInput(''); setTextInput(''); setPdfFile(null); setFocusKeyword('')
     setPerspectives(['', '', '']); setSelectedPerspective(null); setEditedPerspective('')
     setInternalLinks([]); setSelectedLinks([]); setHinweise(''); stopSpeaking()
-    setImageFiles([])    // NEW: reset image files
+    setImageFiles([])
   }
 
   const extractPdfClientSide = (file) => new Promise((resolve, reject) => {
@@ -420,18 +449,17 @@ export default function Home() {
         {error && <div className="status error"><span>⚠️</span> {error}</div>}
         {loading && <div className="status loading"><div className="spinner" />{loadingMsg || 'Einen Moment…'}</div>}
 
-        {/* STEP 0: INPUT */}
+        {/* ─── STEP 0: INPUT ─── */}
         {currentStep === 0 && !loading && (
           <div className="card">
 
-            {/* Hinweise */}
             <div className="card-title"><span className="icon">💡</span> Hinweise <span style={{ fontSize: '0.75rem', fontWeight: '400', color: 'var(--text-muted)' }}>(optional)</span></div>
             <div style={{ fontSize: '0.82rem', color: 'var(--text-muted)', marginBottom: '0.6rem' }}>
               Kontext, Fokus, Zielgruppe oder spezielle Wünsche für diesen Artikel.
             </div>
             <div className="feedback-row" style={{ marginBottom: '1.5rem' }}>
               <textarea
-                placeholder="z.B. &quot;Schreibe aus Sicht eines österreichischen Maschinenbauers&quot; oder &quot;Betone den ROI-Aspekt&quot;…"
+                placeholder="z.B. „Schreibe aus Sicht eines österreichischen Maschinenbauers" oder „Betone den ROI-Aspekt"…"
                 value={hinweise}
                 onChange={e => setHinweise(e.target.value)}
                 rows={3}
@@ -445,38 +473,47 @@ export default function Home() {
 
             <hr className="divider" style={{ margin: '0 0 1.5rem' }} />
 
-            {/* Quelleingabe */}
             <div className="card-title"><span className="icon">📥</span> Content-Quelle</div>
             <div className="input-tabs">
               {[
                 { id: 'url',    label: '🔗 URL / Artikel' },
                 { id: 'pdf',    label: '📄 PDF' },
-                { id: 'images', label: '📸 Fotos / Screenshots' },  // NEW
+                { id: 'images', label: '📸 Fotos / Screenshots' },
                 { id: 'text',   label: '💭 Direkt schreiben' }
               ].map(t => (
                 <button key={t.id} className={`input-tab ${inputType === t.id ? 'active' : ''}`} onClick={() => setInputType(t.id)}>{t.label}</button>
               ))}
             </div>
 
+            {/* URL — type="text" verhindert Browser-Validierungsfehler */}
             {inputType === 'url' && (
-              <input type="url" placeholder="https://..." value={urlInput} onChange={e => setUrlInput(e.target.value)} onKeyDown={e => e.key === 'Enter' && handleGenerate()} />
+              <input
+                type="text"
+                placeholder="https://..."
+                value={urlInput}
+                onChange={e => setUrlInput(e.target.value)}
+                onBlur={e => { if (e.target.value.trim()) setUrlInput(normalizeUrl(e.target.value)) }}
+                onKeyDown={e => e.key === 'Enter' && handleGenerate()}
+              />
             )}
 
             {inputType === 'pdf' && (
               <div className={`upload-area ${pdfFile ? 'dragover' : ''}`} onDrop={handleFileDrop} onDragOver={e => e.preventDefault()} onClick={() => fileInputRef.current?.click()}>
                 <input ref={fileInputRef} type="file" accept=".pdf" onChange={e => setPdfFile(e.target.files[0])} />
-                {pdfFile ? <span style={{ color: 'var(--blue-light)' }}>✅ {pdfFile.name}</span> : <><div style={{ fontSize: '2rem', marginBottom: '0.5rem' }}>📄</div>PDF hier hinziehen oder klicken</>}
+                {pdfFile
+                  ? <span style={{ color: 'var(--blue-light)' }}>✅ {pdfFile.name}</span>
+                  : <><div style={{ fontSize: '2rem', marginBottom: '0.5rem' }}>📄</div>PDF hier hinziehen oder klicken</>
+                }
               </div>
             )}
 
-            {/* NEW: Image / Screenshot upload */}
+            {/* Fotos / Screenshots — max. 10, automatisch komprimiert */}
             {inputType === 'images' && (
               <div>
                 <div style={{ fontSize: '0.8rem', color: 'var(--text-muted)', marginBottom: '0.6rem' }}>
-                  Fotos, Screenshots, Slides oder Scan-Seiten — Claude analysiert die Bilder und schreibt den Artikel daraus. Bis zu 5 Bilder (JPG, PNG, WEBP).
+                  Fotos, Screenshots, Slides oder Scans — Claude analysiert die Bilder und schreibt den Artikel daraus.
+                  Bis zu {MAX_IMAGES} Bilder (JPG, PNG, WEBP) · werden automatisch komprimiert.
                 </div>
-
-                {/* Drop zone */}
                 <div
                   className={`upload-area ${imageFiles.length > 0 ? 'dragover' : ''}`}
                   style={{ minHeight: '110px' }}
@@ -495,17 +532,16 @@ export default function Home() {
                     <>
                       <div style={{ fontSize: '2rem', marginBottom: '0.5rem' }}>📸</div>
                       Bilder hier hinziehen oder klicken<br />
-                      <span style={{ fontSize: '0.72rem', color: 'var(--text-muted)' }}>JPG · PNG · WEBP — max. 5 Bilder</span>
+                      <span style={{ fontSize: '0.72rem', color: 'var(--text-muted)' }}>JPG · PNG · WEBP — max. {MAX_IMAGES} Bilder</span>
                     </>
                   ) : (
                     <span style={{ color: 'var(--blue-light)' }}>
-                      ✅ {imageFiles.length} Bild{imageFiles.length > 1 ? 'er' : ''} ausgewählt
-                      {imageFiles.length < 5 && <span style={{ color: 'var(--text-muted)', fontSize: '0.78rem' }}> — klicken um weitere hinzuzufügen</span>}
+                      ✅ {imageFiles.length}/{MAX_IMAGES} Bild{imageFiles.length > 1 ? 'er' : ''} ausgewählt
+                      {imageFiles.length < MAX_IMAGES && <span style={{ color: 'var(--text-muted)', fontSize: '0.78rem' }}> — klicken um weitere hinzuzufügen</span>}
                     </span>
                   )}
                 </div>
 
-                {/* Preview grid */}
                 {imageFiles.length > 0 && (
                   <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(130px, 1fr))', gap: '8px', marginTop: '0.85rem' }}>
                     {imageFiles.map((file, i) => (
@@ -516,7 +552,6 @@ export default function Home() {
                           alt={file.name}
                           style={{ width: '100%', height: '100%', objectFit: 'cover', display: 'block' }}
                         />
-                        {/* Remove button */}
                         <button
                           onClick={e => { e.stopPropagation(); setImageFiles(prev => prev.filter((_, j) => j !== i)) }}
                           title="Entfernen"
@@ -524,11 +559,9 @@ export default function Home() {
                             position: 'absolute', top: '5px', right: '5px',
                             background: 'rgba(0,0,0,0.65)', border: 'none', borderRadius: '50%',
                             width: '22px', height: '22px', color: 'white', cursor: 'pointer',
-                            fontSize: '11px', display: 'flex', alignItems: 'center', justifyContent: 'center',
-                            lineHeight: 1
+                            fontSize: '11px', display: 'flex', alignItems: 'center', justifyContent: 'center'
                           }}
                         >✕</button>
-                        {/* File name tooltip */}
                         <div style={{
                           position: 'absolute', bottom: 0, left: 0, right: 0,
                           background: 'rgba(0,0,0,0.55)', padding: '3px 6px',
@@ -549,7 +582,7 @@ export default function Home() {
                 </div>
                 <div className="feedback-row">
                   <textarea
-                    placeholder="z.B. &quot;Schreibe einen Artikel über Preispositionierung für Handwerksbetriebe&quot;…"
+                    placeholder="z.B. „Schreibe einen Artikel über Preispositionierung für Handwerksbetriebe"…"
                     value={textInput}
                     onChange={e => setTextInput(e.target.value)}
                     rows={5}
@@ -569,7 +602,7 @@ export default function Home() {
           </div>
         )}
 
-        {/* STEP 1: ARTICLE */}
+        {/* ─── STEP 1: ARTICLE ─── */}
         {currentStep === 1 && !published && (
           <div className="card">
             <div className="card-title">
@@ -602,13 +635,14 @@ export default function Home() {
           </div>
         )}
 
-        {/* STEP 2: DEINE STIMME */}
+        {/* ─── STEP 2: DEINE STIMME ─── */}
         {currentStep === 2 && !published && (
           <div className="card">
             <div className="card-title"><span className="icon">🎙</span> Deine Stimme</div>
             <div style={{ fontSize: '0.85rem', color: 'var(--text-muted)', marginBottom: '1.25rem' }}>
               Wähle einen Perspektiv-Vorschlag, bearbeite ihn — er wird in den Artikel eingebaut.
             </div>
+
             {perspectives.map((p, i) => (
               <div key={i} onClick={() => { setSelectedPerspective(i); setEditedPerspective(p) }}
                 style={{ background: selectedPerspective === i ? 'rgba(2,133,206,0.12)' : 'rgba(255,255,255,0.04)', border: `1px solid ${selectedPerspective === i ? 'var(--blue)' : 'var(--border)'}`, borderRadius: '10px', padding: '1rem', marginBottom: '0.75rem', cursor: 'pointer', transition: 'all 0.15s' }}>
@@ -618,13 +652,16 @@ export default function Home() {
                 <div style={{ fontSize: '0.88rem', lineHeight: '1.6', color: 'rgba(255,255,255,0.85)' }}>{p || '—'}</div>
               </div>
             ))}
+
             {selectedPerspective !== null && (
               <div style={{ marginTop: '1rem' }}>
                 <div style={{ fontSize: '0.72rem', fontWeight: '700', textTransform: 'uppercase', color: 'var(--text-muted)', marginBottom: '0.4rem' }}>✏️ Bearbeiten</div>
                 <textarea value={editedPerspective} onChange={e => setEditedPerspective(e.target.value)} rows={4} style={{ resize: 'vertical' }} />
               </div>
             )}
-            {internalLinks.length > 0 && (
+
+            {/* Interne Links — wird bei Foto-Input NICHT angezeigt */}
+            {inputType !== 'images' && internalLinks.length > 0 && (
               <>
                 <hr className="divider" />
                 <div className="card-title" style={{ marginBottom: '0.75rem' }}><span className="icon">🔗</span> Interne Verlinkungen</div>
@@ -637,6 +674,7 @@ export default function Home() {
                 ))}
               </>
             )}
+
             <div className="btn-row" style={{ marginTop: '1.5rem' }}>
               <button className="btn btn-primary" onClick={handleApplyVoice} disabled={loading}>
                 {editedPerspective.trim() || selectedLinks.length > 0 ? '✅ Einbauen & weiter zu Bild' : '⏭ Überspringen → Bild'}
@@ -646,7 +684,7 @@ export default function Home() {
           </div>
         )}
 
-        {/* STEP 3: IMAGES + SEO */}
+        {/* ─── STEP 3: TITELBILD + SEO ─── */}
         {currentStep === 3 && !published && (
           <div className="card">
             <div className="card-title"><span className="icon">🖼</span> Titelbild wählen</div>
@@ -689,20 +727,16 @@ export default function Home() {
               <div style={{ color: '#006621', fontSize: '0.78rem', marginBottom: '0.2rem', fontFamily: 'arial, sans-serif' }}>branddoc.at › blog › {seoSlug || 'url-slug'}</div>
               <div style={{ color: '#545454', fontSize: '0.82rem', fontFamily: 'arial, sans-serif', lineHeight: '1.4' }}>{seoDescription || 'Meta Description…'}</div>
             </div>
-            {/* Publish Mode Toggle */}
+
             <div style={{ display: 'flex', gap: '10px', marginBottom: '1rem' }}>
               <button
                 onClick={() => setPublishMode('live')}
                 style={{ flex: 1, padding: '0.75rem', borderRadius: '8px', border: `2px solid ${publishMode === 'live' ? 'var(--blue)' : 'var(--border)'}`, background: publishMode === 'live' ? 'rgba(2,133,206,0.15)' : 'transparent', color: publishMode === 'live' ? 'var(--white)' : 'var(--text-muted)', cursor: 'pointer', fontFamily: 'var(--font-display)', fontWeight: '700', fontSize: '0.85rem', transition: 'all 0.15s' }}
-              >
-                🚀 Direkt live
-              </button>
+              >🚀 Direkt live</button>
               <button
                 onClick={() => setPublishMode('draft')}
                 style={{ flex: 1, padding: '0.75rem', borderRadius: '8px', border: `2px solid ${publishMode === 'draft' ? 'var(--blue)' : 'var(--border)'}`, background: publishMode === 'draft' ? 'rgba(2,133,206,0.15)' : 'transparent', color: publishMode === 'draft' ? 'var(--white)' : 'var(--text-muted)', cursor: 'pointer', fontFamily: 'var(--font-display)', fontWeight: '700', fontSize: '0.85rem', transition: 'all 0.15s' }}
-              >
-                📝 Als Entwurf
-              </button>
+              >📝 Als Entwurf</button>
             </div>
 
             <div className="btn-row">
@@ -714,7 +748,7 @@ export default function Home() {
           </div>
         )}
 
-        {/* SUCCESS */}
+        {/* ─── SUCCESS ─── */}
         {published && (
           <div className="card">
             <div className="publish-success">
