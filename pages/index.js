@@ -9,6 +9,7 @@ export default function Home() {
   const [urlInput, setUrlInput] = useState('')
   const [textInput, setTextInput] = useState('')
   const [pdfFile, setPdfFile] = useState(null)
+  const [imageFiles, setImageFiles] = useState([])          // NEW: screenshot/photo files
   const [hinweise, setHinweise] = useState('')
   const [loading, setLoading] = useState(false)
   const [loadingMsg, setLoadingMsg] = useState('')
@@ -31,13 +32,12 @@ export default function Home() {
   const [selectedLinks, setSelectedLinks] = useState([])
 
   const [feedbackText, setFeedbackText] = useState('')
-  const [publishMode, setPublishMode] = useState('live') // 'live' or 'draft'
+  const [publishMode, setPublishMode] = useState('live')
 
   const [isSpeaking, setIsSpeaking] = useState(false)
   const [speechSupported, setSpeechSupported] = useState(false)
   const utteranceRef = useRef(null)
 
-  // Voice states — one per field
   const [isRecordingHinweise, setIsRecordingHinweise] = useState(false)
   const [isRecordingText, setIsRecordingText] = useState(false)
   const [isRecordingFeedback, setIsRecordingFeedback] = useState(false)
@@ -52,6 +52,7 @@ export default function Home() {
   const [publishedUrl, setPublishedUrl] = useState('')
 
   const fileInputRef = useRef(null)
+  const imageInputRef = useRef(null)               // NEW: ref for image file input
 
   useEffect(() => {
     setSpeechSupported(typeof window !== 'undefined' && 'speechSynthesis' in window)
@@ -81,7 +82,6 @@ export default function Home() {
 
   const startVoice = useCallback((setter, setRecording) => {
     if (!voiceSupported) return
-    // Stop any existing recognition
     recognitionRef.current?.stop()
     const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition
     const recognition = new SpeechRecognition()
@@ -112,6 +112,41 @@ export default function Home() {
     setRecording(false)
   }, [])
 
+  // NEW: Convert a File to base64 + mediaType
+  const fileToBase64 = (file) => new Promise((resolve, reject) => {
+    const reader = new FileReader()
+    reader.onload = (e) => {
+      const data = e.target.result.split(',')[1]
+      resolve({ data, mediaType: file.type || 'image/jpeg' })
+    }
+    reader.onerror = () => reject(new Error('Bild konnte nicht gelesen werden'))
+    reader.readAsDataURL(file)
+  })
+
+  // NEW: Validate + add image files (max 5, images only)
+  const handleImageSelect = (files) => {
+    const validTypes = ['image/jpeg', 'image/png', 'image/webp', 'image/gif']
+    const valid = files.filter(f => validTypes.includes(f.type))
+    if (valid.length < files.length) {
+      setError('Nur JPG, PNG, WEBP und GIF werden unterstützt.')
+    }
+    setImageFiles(prev => {
+      const combined = [...prev, ...valid]
+      if (combined.length > 5) {
+        setError('Maximal 5 Bilder erlaubt.')
+        return combined.slice(0, 5)
+      }
+      return combined
+    })
+  }
+
+  // NEW: Drag & drop for images
+  const handleImageDrop = (e) => {
+    e.preventDefault()
+    const files = Array.from(e.dataTransfer.files)
+    handleImageSelect(files)
+  }
+
   const handleGenerate = async () => {
     setError('')
     setLoading(true)
@@ -137,6 +172,18 @@ export default function Home() {
         setLoadingMsg('PDF wird gelesen…')
         content = await extractPdfClientSide(pdfFile)
         title = pdfFile.name
+      } else if (inputType === 'images') {
+        // NEW: image/screenshot path
+        if (imageFiles.length === 0) throw new Error('Bitte mindestens ein Foto oder Screenshot hochladen')
+        setLoadingMsg(`${imageFiles.length} Bild(er) werden analysiert…`)
+        const base64Images = await Promise.all(imageFiles.map(fileToBase64))
+        content = `[${imageFiles.length} Bild(er) hochgeladen]`
+        title = 'Foto-/Screenshot-Analyse'
+        setSourceContent(content)
+        setSourceTitle(title)
+        setLoadingMsg('Artikel wird aus Bildern geschrieben…')
+        await generateArticle(content, title, null, null, 'images', base64Images)
+        return  // generateArticle handles setCurrentStep
       } else {
         if (!textInput.trim()) throw new Error('Bitte Text, Idee oder Thema eingeben')
         content = textInput.trim()
@@ -155,7 +202,8 @@ export default function Home() {
     }
   }
 
-  const generateArticle = async (srcContent, srcTitle, feedback, prevArticle, resolvedType) => {
+  // NEW: added optional `images` param (array of {data, mediaType})
+  const generateArticle = async (srcContent, srcTitle, feedback, prevArticle, resolvedType, images) => {
     const r = await fetch('/api/generate', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
@@ -165,7 +213,8 @@ export default function Home() {
         inputType: resolvedType || inputType,
         feedback,
         previousArticle: prevArticle,
-        hinweise: hinweise.trim() || undefined
+        hinweise: hinweise.trim() || undefined,
+        images: images || undefined           // NEW: pass images to API
       })
     })
     const d = await r.json()
@@ -188,7 +237,6 @@ export default function Home() {
   const handleApplyVoice = () => {
     let updatedArticle = article
 
-    // Insert quote directly after 2nd paragraph — no extra API call
     if (editedPerspective.trim()) {
       const lines = article.split('\n')
       let paragraphCount = 0
@@ -209,7 +257,6 @@ export default function Home() {
       updatedArticle = lines.join('\n')
     }
 
-    // Add internal links as references at end of article
     if (selectedLinks.length > 0) {
       const linkBlock = '\n\n**Weiterführende Artikel:**\n' + selectedLinks.map(l => `- [${l.anchor}](${l.url})`).join('\n')
       updatedArticle = updatedArticle + linkBlock
@@ -289,6 +336,7 @@ export default function Home() {
     setUrlInput(''); setTextInput(''); setPdfFile(null); setFocusKeyword('')
     setPerspectives(['', '', '']); setSelectedPerspective(null); setEditedPerspective('')
     setInternalLinks([]); setSelectedLinks([]); setHinweise(''); stopSpeaking()
+    setImageFiles([])    // NEW: reset image files
   }
 
   const extractPdfClientSide = (file) => new Promise((resolve, reject) => {
@@ -376,7 +424,7 @@ export default function Home() {
         {currentStep === 0 && !loading && (
           <div className="card">
 
-            {/* Hinweise — optional, immer sichtbar */}
+            {/* Hinweise */}
             <div className="card-title"><span className="icon">💡</span> Hinweise <span style={{ fontSize: '0.75rem', fontWeight: '400', color: 'var(--text-muted)' }}>(optional)</span></div>
             <div style={{ fontSize: '0.82rem', color: 'var(--text-muted)', marginBottom: '0.6rem' }}>
               Kontext, Fokus, Zielgruppe oder spezielle Wünsche für diesen Artikel.
@@ -401,9 +449,10 @@ export default function Home() {
             <div className="card-title"><span className="icon">📥</span> Content-Quelle</div>
             <div className="input-tabs">
               {[
-                { id: 'url', label: '🔗 URL / Artikel' },
-                { id: 'pdf', label: '📄 PDF' },
-                { id: 'text', label: '💭 Direkt schreiben' }
+                { id: 'url',    label: '🔗 URL / Artikel' },
+                { id: 'pdf',    label: '📄 PDF' },
+                { id: 'images', label: '📸 Fotos / Screenshots' },  // NEW
+                { id: 'text',   label: '💭 Direkt schreiben' }
               ].map(t => (
                 <button key={t.id} className={`input-tab ${inputType === t.id ? 'active' : ''}`} onClick={() => setInputType(t.id)}>{t.label}</button>
               ))}
@@ -417,6 +466,79 @@ export default function Home() {
               <div className={`upload-area ${pdfFile ? 'dragover' : ''}`} onDrop={handleFileDrop} onDragOver={e => e.preventDefault()} onClick={() => fileInputRef.current?.click()}>
                 <input ref={fileInputRef} type="file" accept=".pdf" onChange={e => setPdfFile(e.target.files[0])} />
                 {pdfFile ? <span style={{ color: 'var(--blue-light)' }}>✅ {pdfFile.name}</span> : <><div style={{ fontSize: '2rem', marginBottom: '0.5rem' }}>📄</div>PDF hier hinziehen oder klicken</>}
+              </div>
+            )}
+
+            {/* NEW: Image / Screenshot upload */}
+            {inputType === 'images' && (
+              <div>
+                <div style={{ fontSize: '0.8rem', color: 'var(--text-muted)', marginBottom: '0.6rem' }}>
+                  Fotos, Screenshots, Slides oder Scan-Seiten — Claude analysiert die Bilder und schreibt den Artikel daraus. Bis zu 5 Bilder (JPG, PNG, WEBP).
+                </div>
+
+                {/* Drop zone */}
+                <div
+                  className={`upload-area ${imageFiles.length > 0 ? 'dragover' : ''}`}
+                  style={{ minHeight: '110px' }}
+                  onDrop={handleImageDrop}
+                  onDragOver={e => e.preventDefault()}
+                  onClick={() => imageInputRef.current?.click()}
+                >
+                  <input
+                    ref={imageInputRef}
+                    type="file"
+                    accept="image/jpeg,image/png,image/webp,image/gif"
+                    multiple
+                    onChange={e => { handleImageSelect(Array.from(e.target.files)); e.target.value = '' }}
+                  />
+                  {imageFiles.length === 0 ? (
+                    <>
+                      <div style={{ fontSize: '2rem', marginBottom: '0.5rem' }}>📸</div>
+                      Bilder hier hinziehen oder klicken<br />
+                      <span style={{ fontSize: '0.72rem', color: 'var(--text-muted)' }}>JPG · PNG · WEBP — max. 5 Bilder</span>
+                    </>
+                  ) : (
+                    <span style={{ color: 'var(--blue-light)' }}>
+                      ✅ {imageFiles.length} Bild{imageFiles.length > 1 ? 'er' : ''} ausgewählt
+                      {imageFiles.length < 5 && <span style={{ color: 'var(--text-muted)', fontSize: '0.78rem' }}> — klicken um weitere hinzuzufügen</span>}
+                    </span>
+                  )}
+                </div>
+
+                {/* Preview grid */}
+                {imageFiles.length > 0 && (
+                  <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(130px, 1fr))', gap: '8px', marginTop: '0.85rem' }}>
+                    {imageFiles.map((file, i) => (
+                      <div key={i} style={{ position: 'relative', borderRadius: '8px', overflow: 'hidden', aspectRatio: '4/3', border: '1px solid var(--border)' }}>
+                        {/* eslint-disable-next-line @next/next/no-img-element */}
+                        <img
+                          src={URL.createObjectURL(file)}
+                          alt={file.name}
+                          style={{ width: '100%', height: '100%', objectFit: 'cover', display: 'block' }}
+                        />
+                        {/* Remove button */}
+                        <button
+                          onClick={e => { e.stopPropagation(); setImageFiles(prev => prev.filter((_, j) => j !== i)) }}
+                          title="Entfernen"
+                          style={{
+                            position: 'absolute', top: '5px', right: '5px',
+                            background: 'rgba(0,0,0,0.65)', border: 'none', borderRadius: '50%',
+                            width: '22px', height: '22px', color: 'white', cursor: 'pointer',
+                            fontSize: '11px', display: 'flex', alignItems: 'center', justifyContent: 'center',
+                            lineHeight: 1
+                          }}
+                        >✕</button>
+                        {/* File name tooltip */}
+                        <div style={{
+                          position: 'absolute', bottom: 0, left: 0, right: 0,
+                          background: 'rgba(0,0,0,0.55)', padding: '3px 6px',
+                          fontSize: '0.62rem', color: 'rgba(255,255,255,0.85)',
+                          overflow: 'hidden', whiteSpace: 'nowrap', textOverflow: 'ellipsis'
+                        }}>{file.name}</div>
+                      </div>
+                    ))}
+                  </div>
+                )}
               </div>
             )}
 
