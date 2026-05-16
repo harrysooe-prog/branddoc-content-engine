@@ -3,8 +3,8 @@ import Head from 'next/head'
 
 const STEPS = ['Input', 'Artikel', 'Stimme', 'Bild', 'Publish']
 const MAX_IMAGES = 10
-const MAX_PX = 1500
-const JPEG_QUALITY = 0.80
+const MAX_PX = 1200
+const JPEG_QUALITY = 0.75
 
 export default function Home() {
   const [currentStep, setCurrentStep] = useState(0)
@@ -115,25 +115,18 @@ export default function Home() {
     setRecording(false)
   }, [])
 
-  // ── URL-Normalisierung & Validierung ────────────────────────────────────
-  // Ergänzt https:// falls fehlend, prüft dann mit new URL() ob die URL
-  // valide ist. new URL() wirft in iOS Safari "The string did not match the
-  // expected pattern." — wir fangen diesen Fehler und ersetzen ihn durch
-  // eine verständliche deutsche Meldung.
   const normalizeAndValidateUrl = (raw) => {
     const trimmed = raw.trim()
     if (!trimmed) throw new Error('Bitte eine URL eingeben')
     const withScheme = /^https?:\/\//i.test(trimmed) ? trimmed : 'https://' + trimmed
     try {
-      new URL(withScheme) // wirft bei ungültiger URL (Safari: "The string did not match...")
+      new URL(withScheme)
     } catch (_) {
-      throw new Error('Bitte eine gültige URL eingeben — z.B. https://beispiel.at/artikel')
+      throw new Error('Bitte eine gueltige URL eingeben - z.B. https://beispiel.at/artikel')
     }
     return withScheme
   }
-  // ────────────────────────────────────────────────────────────────────────
 
-  // ── Canvas-Komprimierung ─────────────────────────────────────────────────
   const compressImage = (file) => new Promise((resolve, reject) => {
     const reader = new FileReader()
     reader.onerror = () => reject(new Error('Bild konnte nicht gelesen werden'))
@@ -157,16 +150,15 @@ export default function Home() {
     }
     reader.readAsDataURL(file)
   })
-  // ────────────────────────────────────────────────────────────────────────
 
   const handleImageSelect = (files) => {
     const validTypes = ['image/jpeg', 'image/png', 'image/webp', 'image/gif']
     const valid = files.filter(f => validTypes.includes(f.type))
-    if (valid.length < files.length) setError('Nur JPG, PNG, WEBP und GIF werden unterstützt.')
+    if (valid.length < files.length) setError('Nur JPG, PNG, WEBP und GIF werden unterstuetzt.')
     setImageFiles(prev => {
       const combined = [...prev, ...valid]
       if (combined.length > MAX_IMAGES) {
-        setError(`Maximal ${MAX_IMAGES} Bilder erlaubt.`)
+        setError('Maximal ' + MAX_IMAGES + ' Bilder erlaubt.')
         return combined.slice(0, MAX_IMAGES)
       }
       return combined
@@ -187,11 +179,9 @@ export default function Home() {
 
     try {
       if (inputType === 'url') {
-        // normalizeAndValidateUrl wirft bei leerem Feld oder ungültiger URL
-        // einen deutschen Fehlertext — kein Safari-Rohfehler gelangt zur UI
         const url = normalizeAndValidateUrl(urlInput)
         setUrlInput(url)
-        setLoadingMsg('URL wird geladen…')
+        setLoadingMsg('URL wird geladen...')
         const r = await fetch('/api/fetch-url', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
@@ -204,19 +194,19 @@ export default function Home() {
 
       } else if (inputType === 'pdf') {
         if (!pdfFile) throw new Error('Bitte ein PDF hochladen')
-        setLoadingMsg('PDF wird gelesen…')
+        setLoadingMsg('PDF wird gelesen...')
         content = await extractPdfClientSide(pdfFile)
         title = pdfFile.name
 
       } else if (inputType === 'images') {
         if (imageFiles.length === 0) throw new Error('Bitte mindestens ein Foto oder Screenshot hochladen')
-        setLoadingMsg(`${imageFiles.length} Bild(er) werden komprimiert…`)
+        setLoadingMsg(imageFiles.length + ' Bild(er) werden komprimiert...')
         const compressed = await Promise.all(imageFiles.map(compressImage))
-        content = `[${imageFiles.length} Bild(er) hochgeladen]`
+        content = '[' + imageFiles.length + ' Bild(er) hochgeladen]'
         title = 'Foto-/Screenshot-Analyse'
         setSourceContent(content)
         setSourceTitle(title)
-        setLoadingMsg('Artikel wird aus Bildern geschrieben…')
+        setLoadingMsg('Artikel wird aus Bildern geschrieben...')
         await generateArticle(content, title, null, null, 'images', compressed)
         return
 
@@ -229,7 +219,7 @@ export default function Home() {
 
       setSourceContent(content)
       setSourceTitle(title)
-      setLoadingMsg('Artikel wird geschrieben…')
+      setLoadingMsg('Artikel wird geschrieben...')
       await generateArticle(content, title, null, null, resolvedInputType)
 
     } catch (err) {
@@ -240,7 +230,7 @@ export default function Home() {
     }
   }
 
-  const generateArticle = async (srcContent, srcTitle, feedback, prevArticle, resolvedType, images) => {
+  const generateArticle = async (srcContent, srcTitle, feedback, prevArticle, resolvedType, imgs) => {
     const r = await fetch('/api/generate', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
@@ -251,7 +241,7 @@ export default function Home() {
         feedback,
         previousArticle: prevArticle,
         hinweise: hinweise.trim() || undefined,
-        images: images || undefined
+        images: imgs || undefined
       })
     })
     const d = await r.json()
@@ -283,11 +273,11 @@ export default function Home() {
           if (paragraphCount === 2) { insertIndex = i + 1; break }
         }
       }
-      lines.splice(insertIndex, 0, `\n„${editedPerspective}"\n— Harald Sturm\n`)
+      lines.splice(insertIndex, 0, '\n' + String.fromCharCode(8222) + editedPerspective + String.fromCharCode(8220) + '\n\u2014 Harald Sturm\n')
       updatedArticle = lines.join('\n')
     }
     if (selectedLinks.length > 0) {
-      updatedArticle += '\n\n**Weiterführende Artikel:**\n' + selectedLinks.map(l => `- [${l.anchor}](${l.url})`).join('\n')
+      updatedArticle += '\n\n**Weiterfuehrende Artikel:**\n' + selectedLinks.map(l => '- [' + l.anchor + '](' + l.url + ')').join('\n')
     }
     setArticle(updatedArticle)
     setCurrentStep(3)
@@ -298,7 +288,7 @@ export default function Home() {
     if (!feedbackText.trim()) return
     setError('')
     setLoading(true)
-    setLoadingMsg('Artikel wird überarbeitet…')
+    setLoadingMsg('Artikel wird ueberarbeitet...')
     try {
       await generateArticle(null, null, feedbackText, article, inputType)
       setFeedbackText('')
@@ -332,10 +322,10 @@ export default function Home() {
   }
 
   const handlePublish = async () => {
-    if (!selectedImage) { setError('Bitte zuerst ein Titelbild auswählen.'); return }
+    if (!selectedImage) { setError('Bitte zuerst ein Titelbild auswaehlen.'); return }
     setError('')
     setLoading(true)
-    setLoadingMsg(publishMode === 'draft' ? 'Wird als Entwurf gespeichert…' : 'Wird auf Wix veröffentlicht…')
+    setLoadingMsg(publishMode === 'draft' ? 'Wird als Entwurf gespeichert...' : 'Wird auf Wix veroeffentlicht...')
     try {
       const r = await fetch('/api/publish-wix', {
         method: 'POST',
@@ -344,7 +334,7 @@ export default function Home() {
       })
       const rawText = await r.text()
       let d = {}
-      try { d = JSON.parse(rawText) } catch (_) { throw new Error('Wix API: Ungültige Antwort — ' + rawText.slice(0, 200)) }
+      try { d = JSON.parse(rawText) } catch (_) { throw new Error('Wix API: Ungueltige Antwort - ' + rawText.slice(0, 200)) }
       if (!r.ok) throw new Error(d.error + (d.detail ? ': ' + d.detail : ''))
       setPublished(true)
       setPublishedUrl(d.postUrl || '')
@@ -416,7 +406,7 @@ export default function Home() {
         title={isRecording ? 'Aufnahme stoppen' : 'Spracheingabe'}
         style={small ? { width: '38px', height: '38px', fontSize: '1rem' } : {}}
       >
-        {isRecording ? '⏹' : '🎙'}
+        {isRecording ? '\u23F9' : '\uD83C\uDF99'}
       </button>
     ) : null
   )
@@ -426,7 +416,7 @@ export default function Home() {
       <Head>
         <title>brandDOC Content Engine</title>
         <meta name="viewport" content="width=device-width, initial-scale=1" />
-        <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>✍️</text></svg>" />
+        <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>&#x270D;&#xFE0F;</text></svg>" />
       </Head>
 
       <div className="app">
@@ -434,7 +424,7 @@ export default function Home() {
           <div className="header-logo">bD</div>
           <div>
             <div className="header-title">brandDOC Content Engine</div>
-            <div className="header-sub">Input → Artikel → Stimme → Bild → Publish</div>
+            <div className="header-sub">Input &rarr; Artikel &rarr; Stimme &rarr; Bild &rarr; Publish</div>
           </div>
         </header>
 
@@ -444,19 +434,19 @@ export default function Home() {
           ))}
         </div>
 
-        {error && <div className="status error"><span>⚠️</span> {error}</div>}
-        {loading && <div className="status loading"><div className="spinner" />{loadingMsg || 'Einen Moment…'}</div>}
+        {error && <div className="status error"><span>&#9888;&#65039;</span> {error}</div>}
+        {loading && <div className="status loading"><div className="spinner" />{loadingMsg || 'Einen Moment...'}</div>}
 
-        {/* ─── STEP 0: INPUT ─── */}
+        {/* STEP 0: INPUT */}
         {currentStep === 0 && !loading && (
           <div className="card">
-            <div className="card-title"><span className="icon">💡</span> Hinweise <span style={{ fontSize: '0.75rem', fontWeight: '400', color: 'var(--text-muted)' }}>(optional)</span></div>
+            <div className="card-title"><span className="icon">&#128161;</span> Hinweise <span style={{ fontSize: '0.75rem', fontWeight: '400', color: 'var(--text-muted)' }}>(optional)</span></div>
             <div style={{ fontSize: '0.82rem', color: 'var(--text-muted)', marginBottom: '0.6rem' }}>
-              Kontext, Fokus, Zielgruppe oder spezielle Wünsche für diesen Artikel.
+              Kontext, Fokus, Zielgruppe oder spezielle Wuensche fuer diesen Artikel.
             </div>
             <div className="feedback-row" style={{ marginBottom: '1.5rem' }}>
               <textarea
-                placeholder="z.B. „Schreibe aus Sicht eines österreichischen Maschinenbauers" oder „Betone den ROI-Aspekt"…"
+                placeholder="z.B. Schreibe aus Sicht eines oesterreichischen Maschinenbauers oder Betone den ROI-Aspekt..."
                 value={hinweise}
                 onChange={e => setHinweise(e.target.value)}
                 rows={3}
@@ -466,19 +456,18 @@ export default function Home() {
 
             <hr className="divider" style={{ margin: '0 0 1.5rem' }} />
 
-            <div className="card-title"><span className="icon">📥</span> Content-Quelle</div>
+            <div className="card-title"><span className="icon">&#128229;</span> Content-Quelle</div>
             <div className="input-tabs">
               {[
-                { id: 'url',    label: '🔗 URL / Artikel' },
-                { id: 'pdf',    label: '📄 PDF' },
-                { id: 'images', label: '📸 Fotos / Screenshots' },
-                { id: 'text',   label: '💭 Direkt schreiben' }
+                { id: 'url',    label: '&#128279; URL / Artikel' },
+                { id: 'pdf',    label: '&#128196; PDF' },
+                { id: 'images', label: '&#128247; Fotos / Screenshots' },
+                { id: 'text',   label: '&#128173; Direkt schreiben' }
               ].map(t => (
-                <button key={t.id} className={`input-tab ${inputType === t.id ? 'active' : ''}`} onClick={() => setInputType(t.id)}>{t.label}</button>
+                <button key={t.id} className={`input-tab ${inputType === t.id ? 'active' : ''}`} onClick={() => setInputType(t.id)} dangerouslySetInnerHTML={{ __html: t.label }} />
               ))}
             </div>
 
-            {/* URL — type="text" + eigene Validierung verhindert Safari-Rohfehler */}
             {inputType === 'url' && (
               <input
                 type="text"
@@ -493,8 +482,8 @@ export default function Home() {
               <div className={`upload-area ${pdfFile ? 'dragover' : ''}`} onDrop={handleFileDrop} onDragOver={e => e.preventDefault()} onClick={() => fileInputRef.current?.click()}>
                 <input ref={fileInputRef} type="file" accept=".pdf" onChange={e => setPdfFile(e.target.files[0])} />
                 {pdfFile
-                  ? <span style={{ color: 'var(--blue-light)' }}>✅ {pdfFile.name}</span>
-                  : <><div style={{ fontSize: '2rem', marginBottom: '0.5rem' }}>📄</div>PDF hier hinziehen oder klicken</>
+                  ? <span style={{ color: 'var(--blue-light)' }}>&#9989; {pdfFile.name}</span>
+                  : <><div style={{ fontSize: '2rem', marginBottom: '0.5rem' }}>&#128196;</div>PDF hier hinziehen oder klicken</>
                 }
               </div>
             )}
@@ -502,8 +491,8 @@ export default function Home() {
             {inputType === 'images' && (
               <div>
                 <div style={{ fontSize: '0.8rem', color: 'var(--text-muted)', marginBottom: '0.6rem' }}>
-                  Fotos, Screenshots, Slides oder Scans — Claude analysiert die Bilder und schreibt den Artikel daraus.
-                  Bis zu {MAX_IMAGES} Bilder (JPG, PNG, WEBP) · werden automatisch komprimiert.
+                  Fotos, Screenshots, Slides oder Scans &mdash; Claude analysiert die Bilder und schreibt den Artikel daraus.
+                  Bis zu {MAX_IMAGES} Bilder (JPG, PNG, WEBP) &middot; werden automatisch komprimiert.
                 </div>
                 <div
                   className={`upload-area ${imageFiles.length > 0 ? 'dragover' : ''}`}
@@ -521,14 +510,14 @@ export default function Home() {
                   />
                   {imageFiles.length === 0 ? (
                     <>
-                      <div style={{ fontSize: '2rem', marginBottom: '0.5rem' }}>📸</div>
+                      <div style={{ fontSize: '2rem', marginBottom: '0.5rem' }}>&#128247;</div>
                       Bilder hier hinziehen oder klicken<br />
-                      <span style={{ fontSize: '0.72rem', color: 'var(--text-muted)' }}>JPG · PNG · WEBP — max. {MAX_IMAGES} Bilder</span>
+                      <span style={{ fontSize: '0.72rem', color: 'var(--text-muted)' }}>JPG &middot; PNG &middot; WEBP &mdash; max. {MAX_IMAGES} Bilder</span>
                     </>
                   ) : (
                     <span style={{ color: 'var(--blue-light)' }}>
-                      ✅ {imageFiles.length}/{MAX_IMAGES} Bild{imageFiles.length > 1 ? 'er' : ''} ausgewählt
-                      {imageFiles.length < MAX_IMAGES && <span style={{ color: 'var(--text-muted)', fontSize: '0.78rem' }}> — klicken um weitere hinzuzufügen</span>}
+                      &#9989; {imageFiles.length}/{MAX_IMAGES} Bild{imageFiles.length > 1 ? 'er' : ''} ausgewaehlt
+                      {imageFiles.length < MAX_IMAGES && <span style={{ color: 'var(--text-muted)', fontSize: '0.78rem' }}> &mdash; klicken um weitere hinzuzufuegen</span>}
                     </span>
                   )}
                 </div>
@@ -542,7 +531,7 @@ export default function Home() {
                           onClick={e => { e.stopPropagation(); setImageFiles(prev => prev.filter((_, j) => j !== i)) }}
                           title="Entfernen"
                           style={{ position: 'absolute', top: '5px', right: '5px', background: 'rgba(0,0,0,0.65)', border: 'none', borderRadius: '50%', width: '22px', height: '22px', color: 'white', cursor: 'pointer', fontSize: '11px', display: 'flex', alignItems: 'center', justifyContent: 'center' }}
-                        >✕</button>
+                        >&#x2715;</button>
                         <div style={{ position: 'absolute', bottom: 0, left: 0, right: 0, background: 'rgba(0,0,0,0.55)', padding: '3px 6px', fontSize: '0.62rem', color: 'rgba(255,255,255,0.85)', overflow: 'hidden', whiteSpace: 'nowrap', textOverflow: 'ellipsis' }}>{file.name}</div>
                       </div>
                     ))}
@@ -554,11 +543,11 @@ export default function Home() {
             {inputType === 'text' && (
               <>
                 <div style={{ fontSize: '0.8rem', color: 'var(--text-muted)', marginBottom: '0.5rem' }}>
-                  Thema, Idee, eigener Text — oder direkt per Stimme einsprechen.
+                  Thema, Idee, eigener Text &mdash; oder direkt per Stimme einsprechen.
                 </div>
                 <div className="feedback-row">
                   <textarea
-                    placeholder="z.B. „Schreibe einen Artikel über Preispositionierung für Handwerksbetriebe"…"
+                    placeholder="z.B. Schreibe einen Artikel ueber Preispositionierung fuer Handwerksbetriebe..."
                     value={textInput}
                     onChange={e => setTextInput(e.target.value)}
                     rows={5}
@@ -569,90 +558,89 @@ export default function Home() {
             )}
 
             <div className="btn-row">
-              <button className="btn btn-primary" onClick={handleGenerate} disabled={loading}>✍️ Artikel generieren</button>
+              <button className="btn btn-primary" onClick={handleGenerate} disabled={loading}>&#9997;&#65039; Artikel generieren</button>
             </div>
           </div>
         )}
 
-        {/* ─── STEP 1: ARTICLE ─── */}
+        {/* STEP 1: ARTICLE */}
         {currentStep === 1 && !published && (
           <div className="card">
             <div className="card-title">
-              <span className="icon">📝</span> Artikel
+              <span className="icon">&#128221;</span> Artikel
               {iteration > 0 && <span className="iteration-badge" style={{ marginLeft: 'auto' }}>Version {iteration}</span>}
             </div>
-            <div style={{ fontSize: '0.75rem', color: 'var(--text-muted)', marginBottom: '0.5rem' }}>✏️ Direkt bearbeitbar</div>
+            <div style={{ fontSize: '0.75rem', color: 'var(--text-muted)', marginBottom: '0.5rem' }}>&#9999;&#65039; Direkt bearbeitbar</div>
             <textarea value={article} onChange={e => setArticle(e.target.value)} rows={20} style={{ resize: 'vertical' }} />
             {speechSupported && (
               <div className="tts-bar">
-                <button className="tts-btn" onClick={isSpeaking ? stopSpeaking : speakArticle}>{isSpeaking ? '⏹' : '▶'}</button>
-                <span className="tts-label">{isSpeaking ? 'Wird vorgelesen… klick zum Stoppen' : 'Artikel anhören'}</span>
+                <button className="tts-btn" onClick={isSpeaking ? stopSpeaking : speakArticle}>{isSpeaking ? '\u23F9' : '\u25B6'}</button>
+                <span className="tts-label">{isSpeaking ? 'Wird vorgelesen... klick zum Stoppen' : 'Artikel anhoeren'}</span>
               </div>
             )}
             <hr className="divider" />
-            <div className="card-title" style={{ marginBottom: '0.75rem' }}><span className="icon">💬</span> Feedback geben</div>
+            <div className="card-title" style={{ marginBottom: '0.75rem' }}><span className="icon">&#128172;</span> Feedback geben</div>
             <div className="feedback-row">
               <textarea placeholder="Was soll anders werden?" value={feedbackText} onChange={e => setFeedbackText(e.target.value)} rows={3} />
               <VoiceBtn isRecording={isRecordingFeedback} onStart={() => startVoice(setFeedbackText, setIsRecordingFeedback)} onStop={() => stopVoice(setIsRecordingFeedback)} />
             </div>
             <div className="btn-row">
-              <button className="btn btn-primary" onClick={handleFeedback} disabled={loading || !feedbackText.trim()}>🔄 Neue Version</button>
-              <button className="btn btn-secondary" onClick={() => setCurrentStep(2)}>✅ Passt — weiter zu Stimme</button>
-              <button className="btn btn-secondary" onClick={handleReset}>↩ Von vorne</button>
+              <button className="btn btn-primary" onClick={handleFeedback} disabled={loading || !feedbackText.trim()}>&#128260; Neue Version</button>
+              <button className="btn btn-secondary" onClick={() => setCurrentStep(2)}>&#9989; Passt - weiter zu Stimme</button>
+              <button className="btn btn-secondary" onClick={handleReset}>&#8617; Von vorne</button>
             </div>
           </div>
         )}
 
-        {/* ─── STEP 2: DEINE STIMME ─── */}
+        {/* STEP 2: DEINE STIMME */}
         {currentStep === 2 && !published && (
           <div className="card">
-            <div className="card-title"><span className="icon">🎙</span> Deine Stimme</div>
+            <div className="card-title"><span className="icon">&#127897;</span> Deine Stimme</div>
             <div style={{ fontSize: '0.85rem', color: 'var(--text-muted)', marginBottom: '1.25rem' }}>
-              Wähle einen Perspektiv-Vorschlag, bearbeite ihn — er wird in den Artikel eingebaut.
+              Waehle einen Perspektiv-Vorschlag, bearbeite ihn &mdash; er wird in den Artikel eingebaut.
             </div>
             {perspectives.map((p, i) => (
               <div key={i} onClick={() => { setSelectedPerspective(i); setEditedPerspective(p) }}
-                style={{ background: selectedPerspective === i ? 'rgba(2,133,206,0.12)' : 'rgba(255,255,255,0.04)', border: `1px solid ${selectedPerspective === i ? 'var(--blue)' : 'var(--border)'}`, borderRadius: '10px', padding: '1rem', marginBottom: '0.75rem', cursor: 'pointer', transition: 'all 0.15s' }}>
+                style={{ background: selectedPerspective === i ? 'rgba(2,133,206,0.12)' : 'rgba(255,255,255,0.04)', border: '1px solid ' + (selectedPerspective === i ? 'var(--blue)' : 'var(--border)'), borderRadius: '10px', padding: '1rem', marginBottom: '0.75rem', cursor: 'pointer', transition: 'all 0.15s' }}>
                 <div style={{ fontSize: '0.7rem', fontWeight: '700', textTransform: 'uppercase', color: 'var(--blue-light)', marginBottom: '0.4rem', letterSpacing: '0.06em' }}>
-                  {i === 0 ? '💬 Persönlich & direkt' : i === 1 ? '⚡ Provokant & fordernd' : '🏭 Praxis & KMU'}
+                  {i === 0 ? '&#128172; Persoenlich & direkt' : i === 1 ? '&#9889; Provokant & fordernd' : '&#127981; Praxis & KMU'}
                 </div>
-                <div style={{ fontSize: '0.88rem', lineHeight: '1.6', color: 'rgba(255,255,255,0.85)' }}>{p || '—'}</div>
+                <div style={{ fontSize: '0.88rem', lineHeight: '1.6', color: 'rgba(255,255,255,0.85)' }}>{p || '&#8212;'}</div>
               </div>
             ))}
             {selectedPerspective !== null && (
               <div style={{ marginTop: '1rem' }}>
-                <div style={{ fontSize: '0.72rem', fontWeight: '700', textTransform: 'uppercase', color: 'var(--text-muted)', marginBottom: '0.4rem' }}>✏️ Bearbeiten</div>
+                <div style={{ fontSize: '0.72rem', fontWeight: '700', textTransform: 'uppercase', color: 'var(--text-muted)', marginBottom: '0.4rem' }}>&#9999;&#65039; Bearbeiten</div>
                 <textarea value={editedPerspective} onChange={e => setEditedPerspective(e.target.value)} rows={4} style={{ resize: 'vertical' }} />
               </div>
             )}
-            {/* Interne Links — nur bei URL/PDF/Text, nicht bei Foto-Upload */}
             {inputType !== 'images' && internalLinks.length > 0 && (
               <>
                 <hr className="divider" />
-                <div className="card-title" style={{ marginBottom: '0.75rem' }}><span className="icon">🔗</span> Interne Verlinkungen</div>
+                <div className="card-title" style={{ marginBottom: '0.75rem' }}><span className="icon">&#128279;</span> Interne Verlinkungen</div>
                 {internalLinks.map((link, i) => (
                   <div key={i} onClick={() => toggleLink(link)}
-                    style={{ background: selectedLinks.find(l => l.url === link.url) ? 'rgba(2,133,206,0.12)' : 'rgba(255,255,255,0.04)', border: `1px solid ${selectedLinks.find(l => l.url === link.url) ? 'var(--blue)' : 'var(--border)'}`, borderRadius: '8px', padding: '0.75rem 1rem', marginBottom: '0.5rem', cursor: 'pointer', transition: 'all 0.15s' }}>
-                    <div style={{ fontSize: '0.82rem', color: 'var(--white)', marginBottom: '0.2rem' }}>📄 {link.title}</div>
-                    <div style={{ fontSize: '0.75rem', color: 'var(--blue-light)' }}>Ankertext: „{link.anchor}"</div>
+                    style={{ background: selectedLinks.find(l => l.url === link.url) ? 'rgba(2,133,206,0.12)' : 'rgba(255,255,255,0.04)', border: '1px solid ' + (selectedLinks.find(l => l.url === link.url) ? 'var(--blue)' : 'var(--border)'), borderRadius: '8px', padding: '0.75rem 1rem', marginBottom: '0.5rem', cursor: 'pointer', transition: 'all 0.15s' }}>
+                    <div style={{ fontSize: '0.82rem', color: 'var(--white)', marginBottom: '0.2rem' }}>&#128196; {link.title}</div>
+                    <div style={{ fontSize: '0.75rem', color: 'var(--blue-light)' }}>Ankertext: {link.anchor}</div>
                   </div>
                 ))}
               </>
             )}
             <div className="btn-row" style={{ marginTop: '1.5rem' }}>
               <button className="btn btn-primary" onClick={handleApplyVoice} disabled={loading}>
-                {editedPerspective.trim() || selectedLinks.length > 0 ? '✅ Einbauen & weiter zu Bild' : '⏭ Überspringen → Bild'}
+                {editedPerspective.trim() || selectedLinks.length > 0 ? '&#9989; Einbauen & weiter zu Bild' : '&#9197; Ueberspringen - Bild'}
               </button>
-              <button className="btn btn-secondary" onClick={() => setCurrentStep(1)}>← Zurück</button>
+              <button className="btn btn-secondary" onClick={() => setCurrentStep(1)}>&#8592; Zurueck</button>
             </div>
           </div>
         )}
 
-        {/* ─── STEP 3: TITELBILD + SEO ─── */}
+        {/* STEP 3: TITELBILD + SEO */}
         {currentStep === 3 && !published && (
           <div className="card">
-            <div className="card-title"><span className="icon">🖼</span> Titelbild wählen</div>
-            {imagesLoading && <div className="status loading"><div className="spinner" /> Bilder werden gesucht…</div>}
+            <div className="card-title"><span className="icon">&#128444;</span> Titelbild waehlen</div>
+            {imagesLoading && <div className="status loading"><div className="spinner" /> Bilder werden gesucht...</div>}
             {!imagesLoading && images.length > 0 && (
               <>
                 <div className="image-grid">
@@ -660,60 +648,62 @@ export default function Home() {
                     <div key={img.id} className={`image-option ${selectedImage?.id === img.id ? 'selected' : ''}`} onClick={() => setSelectedImage(img)}>
                       {/* eslint-disable-next-line @next/next/no-img-element */}
                       <img src={img.thumb} alt={img.alt} />
-                      <div className="check">✓</div>
+                      <div className="check">&#10003;</div>
                     </div>
                   ))}
                 </div>
-                {selectedImage && <div className="image-credit">Foto: <a href={selectedImage.authorUrl} target="_blank" rel="noopener noreferrer" style={{ color: 'var(--blue-light)' }}>{selectedImage.author}</a> via Unsplash</div>}
+                {selectedImage && (
+                  <div className="image-credit">Foto: <a href={selectedImage.authorUrl} target="_blank" rel="noopener noreferrer" style={{ color: 'var(--blue-light)' }}>{selectedImage.author}</a> via Unsplash</div>
+                )}
               </>
             )}
             <hr className="divider" />
-            <div className="card-title" style={{ marginBottom: '1rem' }}><span className="icon">🔍</span> SEO bearbeiten</div>
+            <div className="card-title" style={{ marginBottom: '1rem' }}><span className="icon">&#128269;</span> SEO bearbeiten</div>
             <div style={{ marginBottom: '1rem' }}>
               <div style={{ fontSize: '0.72rem', fontWeight: '700', textTransform: 'uppercase', letterSpacing: '0.06em', color: 'var(--text-muted)', marginBottom: '0.4rem' }}>SEO Titel</div>
-              <input type="text" value={seoTitle} onChange={e => setSeoTitle(e.target.value)} placeholder="SEO Titel…" />
+              <input type="text" value={seoTitle} onChange={e => setSeoTitle(e.target.value)} placeholder="SEO Titel..." />
             </div>
             <div style={{ marginBottom: '1rem' }}>
               <div style={{ fontSize: '0.72rem', fontWeight: '700', textTransform: 'uppercase', letterSpacing: '0.06em', color: 'var(--text-muted)', marginBottom: '0.4rem' }}>Meta Description</div>
-              <textarea value={seoDescription} onChange={e => setSeoDescription(e.target.value)} rows={3} placeholder="Meta Description…" />
+              <textarea value={seoDescription} onChange={e => setSeoDescription(e.target.value)} rows={3} placeholder="Meta Description..." />
             </div>
             <div style={{ marginBottom: '1rem' }}>
               <div style={{ fontSize: '0.72rem', fontWeight: '700', textTransform: 'uppercase', letterSpacing: '0.06em', color: 'var(--text-muted)', marginBottom: '0.4rem' }}>URL Slug</div>
               <input type="text" value={seoSlug} onChange={e => setSeoSlug(e.target.value.toLowerCase().replace(/\s+/g, '-'))} placeholder="url-slug" style={{ fontFamily: 'monospace' }} />
             </div>
             <div style={{ marginBottom: '1.5rem' }}>
-              <div style={{ fontSize: '0.72rem', fontWeight: '700', textTransform: 'uppercase', letterSpacing: '0.06em', color: 'var(--text-muted)', marginBottom: '0.4rem' }}>🎯 Fokus-Keyword</div>
+              <div style={{ fontSize: '0.72rem', fontWeight: '700', textTransform: 'uppercase', letterSpacing: '0.06em', color: 'var(--text-muted)', marginBottom: '0.4rem' }}>&#127919; Fokus-Keyword</div>
               <input type="text" value={focusKeyword} onChange={e => setFocusKeyword(e.target.value)} placeholder="z.B. Markenpositionierung KMU" />
             </div>
             <div style={{ background: 'white', borderRadius: '8px', padding: '1rem 1.25rem', marginBottom: '1.5rem' }}>
               <div style={{ fontSize: '0.65rem', color: '#888', marginBottom: '0.4rem' }}>Google Vorschau</div>
-              <div style={{ color: '#1a0dab', fontSize: '1rem', fontWeight: '600', marginBottom: '0.15rem', fontFamily: 'arial, sans-serif' }}>{seoTitle || 'SEO Titel…'}</div>
-              <div style={{ color: '#006621', fontSize: '0.78rem', marginBottom: '0.2rem', fontFamily: 'arial, sans-serif' }}>branddoc.at › blog › {seoSlug || 'url-slug'}</div>
-              <div style={{ color: '#545454', fontSize: '0.82rem', fontFamily: 'arial, sans-serif', lineHeight: '1.4' }}>{seoDescription || 'Meta Description…'}</div>
+              <div style={{ color: '#1a0dab', fontSize: '1rem', fontWeight: '600', marginBottom: '0.15rem', fontFamily: 'arial, sans-serif' }}>{seoTitle || 'SEO Titel...'}</div>
+              <div style={{ color: '#006621', fontSize: '0.78rem', marginBottom: '0.2rem', fontFamily: 'arial, sans-serif' }}>branddoc.at &rsaquo; blog &rsaquo; {seoSlug || 'url-slug'}</div>
+              <div style={{ color: '#545454', fontSize: '0.82rem', fontFamily: 'arial, sans-serif', lineHeight: '1.4' }}>{seoDescription || 'Meta Description...'}</div>
             </div>
             <div style={{ display: 'flex', gap: '10px', marginBottom: '1rem' }}>
-              <button onClick={() => setPublishMode('live')} style={{ flex: 1, padding: '0.75rem', borderRadius: '8px', border: `2px solid ${publishMode === 'live' ? 'var(--blue)' : 'var(--border)'}`, background: publishMode === 'live' ? 'rgba(2,133,206,0.15)' : 'transparent', color: publishMode === 'live' ? 'var(--white)' : 'var(--text-muted)', cursor: 'pointer', fontFamily: 'var(--font-display)', fontWeight: '700', fontSize: '0.85rem', transition: 'all 0.15s' }}>🚀 Direkt live</button>
-              <button onClick={() => setPublishMode('draft')} style={{ flex: 1, padding: '0.75rem', borderRadius: '8px', border: `2px solid ${publishMode === 'draft' ? 'var(--blue)' : 'var(--border)'}`, background: publishMode === 'draft' ? 'rgba(2,133,206,0.15)' : 'transparent', color: publishMode === 'draft' ? 'var(--white)' : 'var(--text-muted)', cursor: 'pointer', fontFamily: 'var(--font-display)', fontWeight: '700', fontSize: '0.85rem', transition: 'all 0.15s' }}>📝 Als Entwurf</button>
+              <button onClick={() => setPublishMode('live')} style={{ flex: 1, padding: '0.75rem', borderRadius: '8px', border: '2px solid ' + (publishMode === 'live' ? 'var(--blue)' : 'var(--border)'), background: publishMode === 'live' ? 'rgba(2,133,206,0.15)' : 'transparent', color: publishMode === 'live' ? 'var(--white)' : 'var(--text-muted)', cursor: 'pointer', fontFamily: 'var(--font-display)', fontWeight: '700', fontSize: '0.85rem', transition: 'all 0.15s' }}>&#128640; Direkt live</button>
+              <button onClick={() => setPublishMode('draft')} style={{ flex: 1, padding: '0.75rem', borderRadius: '8px', border: '2px solid ' + (publishMode === 'draft' ? 'var(--blue)' : 'var(--border)'), background: publishMode === 'draft' ? 'rgba(2,133,206,0.15)' : 'transparent', color: publishMode === 'draft' ? 'var(--white)' : 'var(--text-muted)', cursor: 'pointer', fontFamily: 'var(--font-display)', fontWeight: '700', fontSize: '0.85rem', transition: 'all 0.15s' }}>&#128221; Als Entwurf</button>
             </div>
             <div className="btn-row">
               <button className="btn btn-publish" onClick={handlePublish} disabled={loading || !selectedImage}>
-                {publishMode === 'draft' ? '📝 Als Entwurf speichern' : '🚀 Jetzt auf Wix veröffentlichen'}
+                {publishMode === 'draft' ? '&#128221; Als Entwurf speichern' : '&#128640; Jetzt auf Wix veroeffentlichen'}
               </button>
             </div>
-            {!selectedImage && <div style={{ fontSize: '0.75rem', color: 'var(--text-muted)', textAlign: 'center', marginTop: '0.5rem' }}>Bitte zuerst ein Titelbild auswählen.</div>}
+            {!selectedImage && <div style={{ fontSize: '0.75rem', color: 'var(--text-muted)', textAlign: 'center', marginTop: '0.5rem' }}>Bitte zuerst ein Titelbild auswaehlen.</div>}
           </div>
         )}
 
-        {/* ─── SUCCESS ─── */}
+        {/* SUCCESS */}
         {published && (
           <div className="card">
             <div className="publish-success">
-              <div className="big-check">🎉</div>
+              <div className="big-check">&#127881;</div>
               <h2>{publishMode === 'draft' ? 'Entwurf gespeichert!' : 'Artikel ist live!'}</h2>
-              <p>{publishMode === 'draft' ? 'Dein Artikel wurde als Entwurf auf Wix gespeichert.' : 'Dein Blogartikel wurde erfolgreich auf branddoc.at veröffentlicht.'}</p>
-              {publishedUrl && <a href={publishedUrl} target="_blank" rel="noopener noreferrer" className="btn btn-secondary" style={{ display: 'inline-flex', marginBottom: '1rem' }}>🌐 Artikel ansehen</a>}
+              <p>{publishMode === 'draft' ? 'Dein Artikel wurde als Entwurf auf Wix gespeichert.' : 'Dein Blogartikel wurde erfolgreich auf branddoc.at veroeffentlicht.'}</p>
+              {publishedUrl && <a href={publishedUrl} target="_blank" rel="noopener noreferrer" className="btn btn-secondary" style={{ display: 'inline-flex', marginBottom: '1rem' }}>&#127760; Artikel ansehen</a>}
               <br />
-              <button className="btn btn-primary" onClick={handleReset} style={{ marginTop: '0.75rem' }}>✍️ Nächsten Artikel schreiben</button>
+              <button className="btn btn-primary" onClick={handleReset} style={{ marginTop: '0.75rem' }}>&#9997;&#65039; Naechsten Artikel schreiben</button>
             </div>
           </div>
         )}
