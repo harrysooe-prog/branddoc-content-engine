@@ -3,8 +3,8 @@ import Head from 'next/head'
 
 const STEPS = ['Input', 'Artikel', 'Stimme', 'Bild', 'Publish']
 const MAX_IMAGES = 10
-const MAX_PX = 1200
-const JPEG_QUALITY = 0.75
+const MAX_PX = 800
+const JPEG_QUALITY = 0.60
 
 // Rohe Browser-Fehlermeldungen in lesbares Deutsch uebersetzen.
 // WICHTIG: Kein URL-spezifischer Text fuer generische Fehler —
