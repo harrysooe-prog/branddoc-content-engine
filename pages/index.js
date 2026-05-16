@@ -138,15 +138,13 @@ export default function Home() {
     setRecording(false)
   }, [])
 
-  // URL normalisieren und validieren — fange Safari-Fehler fruehzeitig ab
+  // URL normalisieren — https:// ergaenzen falls fehlend.
+  // Keine weitere Validierung: new URL() in iOS Safari lehnt valide URLs ab.
+  // Die fetch-url API entscheidet ob die URL erreichbar ist.
   const normalizeUrl = (raw) => {
     const trimmed = raw.trim()
     if (!trimmed) throw new Error('Bitte eine URL eingeben')
-    const withScheme = /^https?:\/\//i.test(trimmed) ? trimmed : 'https://' + trimmed
-    try { new URL(withScheme) } catch (_) {
-      throw new Error('Die URL ist nicht gueltig. Bitte eine vollstaendige Adresse eingeben (z.B. https://beispiel.at/artikel)')
-    }
-    return withScheme
+    return /^https?:\/\//i.test(trimmed) ? trimmed : 'https://' + trimmed
   }
 
   // Bild komprimieren: max 1200px, JPEG 75% — reduziert 5MB PNGs auf ~100-200KB
