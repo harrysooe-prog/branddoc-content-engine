@@ -6,25 +6,27 @@ const MAX_IMAGES = 10
 const MAX_PX = 1200
 const JPEG_QUALITY = 0.75
 
-// Rohe Browser-Fehlermeldungen (vor allem iOS Safari) in lesbares Deutsch uebersetzen
+// Rohe Browser-Fehlermeldungen in lesbares Deutsch uebersetzen.
+// WICHTIG: Kein URL-spezifischer Text fuer generische Fehler —
+// "did not match the expected pattern" kann auch aus der Bildverarbeitung kommen.
 function sanitizeError(err) {
   const msg = (err && err.message) ? err.message : String(err)
+  if (msg.includes('Body exceeded') || msg.includes('PayloadTooLarge')) {
+    return 'Die Bilder sind zu gross. Bitte weniger oder kleinere Bilder auswaehlen.'
+  }
+  if (msg.includes('NetworkError') || msg.includes('Failed to fetch')) {
+    return 'Keine Verbindung. Bitte Internetverbindung pruefen und erneut versuchen.'
+  }
+  if (msg.includes('Unexpected token') || msg.includes('not valid JSON')) {
+    return 'Server-Fehler. Bitte erneut versuchen.'
+  }
   if (
     msg.includes('did not match the expected pattern') ||
     msg.includes('Invalid URL') ||
     msg.includes('Failed to construct') ||
     msg.includes('is not a valid URL')
   ) {
-    return 'Die URL ist nicht gueltig. Bitte eine vollstaendige Adresse eingeben (z.B. https://beispiel.at/artikel)'
-  }
-  if (msg.includes('Body exceeded') || msg.includes('body size') || msg.includes('PayloadTooLarge')) {
-    return 'Die Bilder sind zu gross. Bitte weniger oder kleinere Bilder auswaehlen.'
-  }
-  if (msg.includes('Unexpected token') || msg.includes('not valid JSON') || msg.includes('JSON')) {
-    return 'Server-Fehler. Bitte erneut versuchen.'
-  }
-  if (msg.includes('NetworkError') || msg.includes('Failed to fetch') || msg.includes('network')) {
-    return 'Keine Verbindung. Bitte Internetverbindung pruefen und erneut versuchen.'
+    return 'Verarbeitung fehlgeschlagen. Bitte erneut versuchen.'
   }
   return msg
 }
@@ -138,35 +140,45 @@ export default function Home() {
     setRecording(false)
   }, [])
 
-  // URL normalisieren — https:// ergaenzen falls fehlend.
-  // Keine weitere Validierung: new URL() in iOS Safari lehnt valide URLs ab.
-  // Die fetch-url API entscheidet ob die URL erreichbar ist.
+  // URL normalisieren — nur https:// ergaenzen, keine weitere Validierung.
+  // new URL() in iOS Safari lehnt valide URLs ab, daher wird die Validierung
+  // vollstaendig der fetch-url API ueberlassen.
   const normalizeUrl = (raw) => {
     const trimmed = raw.trim()
     if (!trimmed) throw new Error('Bitte eine URL eingeben')
     return /^https?:\/\//i.test(trimmed) ? trimmed : 'https://' + trimmed
   }
 
-  // Bild komprimieren: max 1200px, JPEG 75% — reduziert 5MB PNGs auf ~100-200KB
+  // Bild komprimieren: max MAX_PX, JPEG JPEG_QUALITY.
+  // try-catch um img.src: iOS Safari kann dort synchron werfen.
   const compressImage = (file) => new Promise((resolve, reject) => {
     const reader = new FileReader()
     reader.onerror = () => reject(new Error('Bild konnte nicht gelesen werden'))
     reader.onload = (e) => {
-      const img = new Image()
-      img.onerror = () => reject(new Error('Bild konnte nicht dekodiert werden'))
-      img.onload = () => {
-        let { width, height } = img
-        if (width > MAX_PX || height > MAX_PX) {
-          if (width >= height) { height = Math.round(height * MAX_PX / width); width = MAX_PX }
-          else { width = Math.round(width * MAX_PX / height); height = MAX_PX }
+      try {
+        const img = new Image()
+        img.onerror = () => reject(new Error('Bild konnte nicht geladen werden'))
+        img.onload = () => {
+          try {
+            let { width, height } = img
+            if (width > MAX_PX || height > MAX_PX) {
+              if (width >= height) { height = Math.round(height * MAX_PX / width); width = MAX_PX }
+              else { width = Math.round(width * MAX_PX / height); height = MAX_PX }
+            }
+            const canvas = document.createElement('canvas')
+            canvas.width = width
+            canvas.height = height
+            canvas.getContext('2d').drawImage(img, 0, 0, width, height)
+            const data = canvas.toDataURL('image/jpeg', JPEG_QUALITY).split(',')[1]
+            resolve({ data, mediaType: 'image/jpeg' })
+          } catch (canvasErr) {
+            reject(new Error('Bild konnte nicht komprimiert werden'))
+          }
         }
-        const canvas = document.createElement('canvas')
-        canvas.width = width
-        canvas.height = height
-        canvas.getContext('2d').drawImage(img, 0, 0, width, height)
-        resolve({ data: canvas.toDataURL('image/jpeg', JPEG_QUALITY).split(',')[1], mediaType: 'image/jpeg' })
+        img.src = e.target.result  // Safari kann hier synchron werfen
+      } catch (srcErr) {
+        reject(new Error('Bild konnte nicht verarbeitet werden'))
       }
-      img.src = e.target.result
     }
     reader.readAsDataURL(file)
   })
@@ -177,7 +189,10 @@ export default function Home() {
     if (valid.length < files.length) setError('Nur JPG, PNG, WEBP und GIF werden unterstuetzt.')
     setImageFiles(prev => {
       const combined = [...prev, ...valid]
-      if (combined.length > MAX_IMAGES) { setError('Maximal ' + MAX_IMAGES + ' Bilder erlaubt.'); return combined.slice(0, MAX_IMAGES) }
+      if (combined.length > MAX_IMAGES) {
+        setError('Maximal ' + MAX_IMAGES + ' Bilder erlaubt.')
+        return combined.slice(0, MAX_IMAGES)
+      }
       return combined
     })
   }
@@ -196,7 +211,6 @@ export default function Home() {
 
     try {
       if (inputType === 'url') {
-        // normalizeUrl wirft bei ungueltigem Input bereits einen deutschen Fehler
         const url = normalizeUrl(urlInput)
         setUrlInput(url)
         setLoadingMsg('URL wird geladen...')
@@ -211,7 +225,6 @@ export default function Home() {
         } catch (fetchErr) {
           throw new Error(sanitizeError(fetchErr))
         }
-        // API-Fehlermeldungen ebenfalls bereinigen
         if (!r.ok) throw new Error(sanitizeError({ message: d.error || 'URL konnte nicht geladen werden' }))
         content = d.content
         title = d.title
@@ -247,7 +260,6 @@ export default function Home() {
       await generateArticle(content, title, null, null, resolvedInputType)
 
     } catch (err) {
-      // Letzter Sicherheitsnetz: alle noch nicht abgefangenen Rohfehler uebersetzen
       setError(sanitizeError(err))
     } finally {
       setLoading(false)
@@ -428,6 +440,11 @@ export default function Home() {
     setSelectedLinks(prev => prev.find(l => l.url === link.url) ? prev.filter(l => l.url !== link.url) : [...prev, link])
   }
 
+  const switchTab = (tab) => {
+    setInputType(tab)
+    setError('')
+  }
+
   const VoiceBtn = ({ isRecording, onStart, onStop }) => (
     voiceSupported ? (
       <button
@@ -498,10 +515,10 @@ export default function Home() {
 
             <div className="card-title"><span className="icon">&#128229;</span> Content-Quelle</div>
             <div className="input-tabs">
-              <button className={inputType === 'url' ? 'input-tab active' : 'input-tab'} onClick={() => { setInputType('url'); setError('') }}>&#128279; URL / Artikel</button>
-              <button className={inputType === 'pdf' ? 'input-tab active' : 'input-tab'} onClick={() => { setInputType('pdf'); setError('') }}>&#128196; PDF</button>
-              <button className={inputType === 'images' ? 'input-tab active' : 'input-tab'} onClick={() => { setInputType('images'); setError('') }}>&#128247; Fotos / Screenshots</button>
-              <button className={inputType === 'text' ? 'input-tab active' : 'input-tab'} onClick={() => { setInputType('text'); setError('') }}>&#128173; Direkt schreiben</button>
+              <button className={inputType === 'url' ? 'input-tab active' : 'input-tab'} onClick={() => switchTab('url')}>&#128279; URL / Artikel</button>
+              <button className={inputType === 'pdf' ? 'input-tab active' : 'input-tab'} onClick={() => switchTab('pdf')}>&#128196; PDF</button>
+              <button className={inputType === 'images' ? 'input-tab active' : 'input-tab'} onClick={() => switchTab('images')}>&#128247; Fotos / Screenshots</button>
+              <button className={inputType === 'text' ? 'input-tab active' : 'input-tab'} onClick={() => switchTab('text')}>&#128173; Direkt schreiben</button>
             </div>
 
             {inputType === 'url' && (
@@ -738,15 +755,11 @@ export default function Home() {
               <button
                 onClick={() => setPublishMode('live')}
                 style={{ flex: 1, padding: '0.75rem', borderRadius: '8px', border: '2px solid ' + (publishMode === 'live' ? 'var(--blue)' : 'var(--border)'), background: publishMode === 'live' ? 'rgba(2,133,206,0.15)' : 'transparent', color: publishMode === 'live' ? 'var(--white)' : 'var(--text-muted)', cursor: 'pointer', fontFamily: 'var(--font-display)', fontWeight: '700', fontSize: '0.85rem', transition: 'all 0.15s' }}
-              >
-                Direkt live
-              </button>
+              >Direkt live</button>
               <button
                 onClick={() => setPublishMode('draft')}
                 style={{ flex: 1, padding: '0.75rem', borderRadius: '8px', border: '2px solid ' + (publishMode === 'draft' ? 'var(--blue)' : 'var(--border)'), background: publishMode === 'draft' ? 'rgba(2,133,206,0.15)' : 'transparent', color: publishMode === 'draft' ? 'var(--white)' : 'var(--text-muted)', cursor: 'pointer', fontFamily: 'var(--font-display)', fontWeight: '700', fontSize: '0.85rem', transition: 'all 0.15s' }}
-              >
-                Als Entwurf
-              </button>
+              >Als Entwurf</button>
             </div>
             <div className="btn-row">
               <button className="btn btn-publish" onClick={handlePublish} disabled={loading || !selectedImage}>
