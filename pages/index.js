@@ -498,10 +498,10 @@ export default function Home() {
 
             <div className="card-title"><span className="icon">&#128229;</span> Content-Quelle</div>
             <div className="input-tabs">
-              <button className={inputType === 'url' ? 'input-tab active' : 'input-tab'} onClick={() => setInputType('url')}>&#128279; URL / Artikel</button>
-              <button className={inputType === 'pdf' ? 'input-tab active' : 'input-tab'} onClick={() => setInputType('pdf')}>&#128196; PDF</button>
-              <button className={inputType === 'images' ? 'input-tab active' : 'input-tab'} onClick={() => setInputType('images')}>&#128247; Fotos / Screenshots</button>
-              <button className={inputType === 'text' ? 'input-tab active' : 'input-tab'} onClick={() => setInputType('text')}>&#128173; Direkt schreiben</button>
+              <button className={inputType === 'url' ? 'input-tab active' : 'input-tab'} onClick={() => { setInputType('url'); setError('') }}>&#128279; URL / Artikel</button>
+              <button className={inputType === 'pdf' ? 'input-tab active' : 'input-tab'} onClick={() => { setInputType('pdf'); setError('') }}>&#128196; PDF</button>
+              <button className={inputType === 'images' ? 'input-tab active' : 'input-tab'} onClick={() => { setInputType('images'); setError('') }}>&#128247; Fotos / Screenshots</button>
+              <button className={inputType === 'text' ? 'input-tab active' : 'input-tab'} onClick={() => { setInputType('text'); setError('') }}>&#128173; Direkt schreiben</button>
             </div>
 
             {inputType === 'url' && (
