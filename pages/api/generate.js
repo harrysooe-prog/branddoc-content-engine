@@ -23,7 +23,7 @@ const EXISTING_ARTICLES = [
 
 export default async function handler(req, res) {
   if (req.method !== 'POST') return res.status(405).end()
-  const { sourceContent, sourceTitle, feedback, previousArticle, inputType, hinweise } = req.body
+  const { sourceContent, sourceTitle, feedback, previousArticle, inputType, hinweise, images } = req.body
 
   const articleList = EXISTING_ARTICLES.map(a => `- "${a.title}" (${a.url}) — Themen: ${a.topics}`).join('\n')
 
@@ -44,6 +44,7 @@ INHALTSTREUE:
 - Erfinde KEINE neuen Fakten oder Zahlen die nicht in der Quelle stehen.
 - Adaption in Haralds Stimme — nicht Neuerfindung des Inhalts.
 - Bei Direktartikeln (ohne Quelle): schreibe aus Haralds Expertise heraus, konkret und praxisnah.
+- Bei Bildern/Screenshots: Analysiere alle sichtbaren Inhalte sorgfältig (Text, Grafiken, Daten, Kontext) und nutze diese als Grundlage.
 
 PERSPEKTIVE & FRAMING:
 - Jeder Artikel braucht eine klare Haltung — nicht nur Analyse, sondern Meinung.
@@ -74,13 +75,52 @@ INTERNAL_LINK_2: TITLE|URL|ANKERTEXT
 Bestehende Artikel auf branddoc.at:
 ${articleList}`
 
-  let userMessage = ''
+  // --- Build the user message (string or multipart array) ---
+  let messageContent
+
   if (feedback && previousArticle) {
-    userMessage = `Hier ist der bisherige Blogartikel:\n\n${previousArticle}\n\n---\n\nHaralds Feedback:\n${feedback}\n\nBitte überarbeite den Artikel entsprechend. Behalte was gut ist, ändere was Harald kritisiert hat.`
+    // Feedback / revision iteration — always text-only
+    messageContent = `Hier ist der bisherige Blogartikel:\n\n${previousArticle}\n\n---\n\nHaralds Feedback:\n${feedback}\n\nBitte überarbeite den Artikel entsprechend. Behalte was gut ist, ändere was Harald kritisiert hat.`
+
+  } else if (inputType === 'images' && Array.isArray(images) && images.length > 0) {
+    // ── NEW: Vision / Screenshot path ──────────────────────────────────────
+    // Validate images: each entry must have { data: string, mediaType: string }
+    const allowedTypes = ['image/jpeg', 'image/png', 'image/webp', 'image/gif']
+    const validImages = images.filter(
+      img => img && typeof img.data === 'string' && img.data.length > 0 && allowedTypes.includes(img.mediaType)
+    )
+
+    if (validImages.length === 0) {
+      return res.status(400).json({ error: 'Keine gültigen Bilder übergeben (erlaubt: JPG, PNG, WEBP, GIF).' })
+    }
+
+    // Build multipart content: images first, instruction text last
+    messageContent = [
+      ...validImages.map(img => ({
+        type: 'image',
+        source: {
+          type: 'base64',
+          media_type: img.mediaType,
+          data: img.data
+        }
+      })),
+      {
+        type: 'text',
+        text: [
+          `Analysiere ${validImages.length === 1 ? 'dieses Bild' : `diese ${validImages.length} Bilder`} sorgfältig —`,
+          'lies alle sichtbaren Texte, erkenne Grafiken, Daten, Diagramme und Kontext.',
+          'Schreibe dann einen Blogartikel für brandDOC.at, der den Inhalt der Bilder als Grundlage nutzt.',
+          hinweise ? `\n\nZusätzliche Hinweise von Harald: ${hinweise}` : ''
+        ].join(' ')
+      }
+    ]
+    // ── End Vision path ────────────────────────────────────────────────────
+
   } else if (inputType === 'direkt') {
-    userMessage = `Schreibe einen Blogartikel für brandDOC.at basierend auf diesem Thema/Prompt:\n\n${sourceContent}${hinweise ? `\n\nZusätzliche Hinweise von Harald:\n${hinweise}` : ''}`
+    messageContent = `Schreibe einen Blogartikel für brandDOC.at basierend auf diesem Thema/Prompt:\n\n${sourceContent}${hinweise ? `\n\nZusätzliche Hinweise von Harald:\n${hinweise}` : ''}`
+
   } else {
-    userMessage = `Schreibe einen Blogartikel für brandDOC.at basierend auf diesem ${inputType === 'url' ? 'Artikel' : 'Dokument'}.
+    messageContent = `Schreibe einen Blogartikel für brandDOC.at basierend auf diesem ${inputType === 'url' ? 'Artikel' : 'Dokument'}.
 
 WICHTIG: Bleibe eng an den Fakten, Zahlen, Zitaten und Argumenten der Quelle. Adaptiere in Haralds Stimme — erfinde nichts dazu.
 ${hinweise ? `\nZusätzliche Hinweise von Harald: ${hinweise}` : ''}
@@ -101,7 +141,13 @@ ${sourceContent}`
         model: 'claude-opus-4-5',
         max_tokens: 3000,
         system: systemPrompt,
-        messages: [{ role: 'user', content: userMessage }]
+        messages: [
+          {
+            role: 'user',
+            // messageContent is either a plain string or an array of content blocks (vision)
+            content: messageContent
+          }
+        ]
       })
     })
 
