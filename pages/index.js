@@ -3,8 +3,8 @@ import Head from 'next/head'
 
 const STEPS = ['Input', 'Artikel', 'Stimme', 'Bild', 'Publish']
 const MAX_IMAGES = 10
-const MAX_PX = 1500       // max Breite/Höhe nach Komprimierung
-const JPEG_QUALITY = 0.80 // 80% JPEG-Qualität — gut für Claude, klein im Speicher
+const MAX_PX = 1500
+const JPEG_QUALITY = 0.80
 
 export default function Home() {
   const [currentStep, setCurrentStep] = useState(0)
@@ -115,9 +115,25 @@ export default function Home() {
     setRecording(false)
   }, [])
 
-  // ── Canvas-Komprimierung ──────────────────────────────────────────────────
-  // Lädt ein File-Objekt als Image, skaliert auf max MAX_PX und exportiert
-  // als JPEG mit JPEG_QUALITY. Gibt { data: base64string, mediaType } zurück.
+  // ── URL-Normalisierung & Validierung ────────────────────────────────────
+  // Ergänzt https:// falls fehlend, prüft dann mit new URL() ob die URL
+  // valide ist. new URL() wirft in iOS Safari "The string did not match the
+  // expected pattern." — wir fangen diesen Fehler und ersetzen ihn durch
+  // eine verständliche deutsche Meldung.
+  const normalizeAndValidateUrl = (raw) => {
+    const trimmed = raw.trim()
+    if (!trimmed) throw new Error('Bitte eine URL eingeben')
+    const withScheme = /^https?:\/\//i.test(trimmed) ? trimmed : 'https://' + trimmed
+    try {
+      new URL(withScheme) // wirft bei ungültiger URL (Safari: "The string did not match...")
+    } catch (_) {
+      throw new Error('Bitte eine gültige URL eingeben — z.B. https://beispiel.at/artikel')
+    }
+    return withScheme
+  }
+  // ────────────────────────────────────────────────────────────────────────
+
+  // ── Canvas-Komprimierung ─────────────────────────────────────────────────
   const compressImage = (file) => new Promise((resolve, reject) => {
     const reader = new FileReader()
     reader.onerror = () => reject(new Error('Bild konnte nicht gelesen werden'))
@@ -125,7 +141,6 @@ export default function Home() {
       const img = new Image()
       img.onerror = () => reject(new Error('Bild konnte nicht dekodiert werden'))
       img.onload = () => {
-        // Zielgröße berechnen
         let { width, height } = img
         if (width > MAX_PX || height > MAX_PX) {
           if (width >= height) { height = Math.round(height * MAX_PX / width); width = MAX_PX }
@@ -134,20 +149,16 @@ export default function Home() {
         const canvas = document.createElement('canvas')
         canvas.width = width
         canvas.height = height
-        const ctx = canvas.getContext('2d')
-        ctx.drawImage(img, 0, 0, width, height)
-        // Immer als JPEG exportieren (auch PNG-Input) — kleinste Dateigröße
+        canvas.getContext('2d').drawImage(img, 0, 0, width, height)
         const dataUrl = canvas.toDataURL('image/jpeg', JPEG_QUALITY)
-        const data = dataUrl.split(',')[1]
-        resolve({ data, mediaType: 'image/jpeg' })
+        resolve({ data: dataUrl.split(',')[1], mediaType: 'image/jpeg' })
       }
       img.src = e.target.result
     }
     reader.readAsDataURL(file)
   })
-  // ─────────────────────────────────────────────────────────────────────────
+  // ────────────────────────────────────────────────────────────────────────
 
-  // Validate + add image files (max MAX_IMAGES)
   const handleImageSelect = (files) => {
     const validTypes = ['image/jpeg', 'image/png', 'image/webp', 'image/gif']
     const valid = files.filter(f => validTypes.includes(f.type))
@@ -167,14 +178,6 @@ export default function Home() {
     handleImageSelect(Array.from(e.dataTransfer.files))
   }
 
-  // Normalize URL — add https:// if missing
-  const normalizeUrl = (raw) => {
-    const trimmed = raw.trim()
-    if (!trimmed) return ''
-    if (/^https?:\/\//i.test(trimmed)) return trimmed
-    return 'https://' + trimmed
-  }
-
   const handleGenerate = async () => {
     setError('')
     setLoading(true)
@@ -184,8 +187,9 @@ export default function Home() {
 
     try {
       if (inputType === 'url') {
-        if (!urlInput.trim()) throw new Error('Bitte eine URL eingeben')
-        const url = normalizeUrl(urlInput)
+        // normalizeAndValidateUrl wirft bei leerem Feld oder ungültiger URL
+        // einen deutschen Fehlertext — kein Safari-Rohfehler gelangt zur UI
+        const url = normalizeAndValidateUrl(urlInput)
         setUrlInput(url)
         setLoadingMsg('URL wird geladen…')
         const r = await fetch('/api/fetch-url', {
@@ -194,7 +198,7 @@ export default function Home() {
           body: JSON.stringify({ url })
         })
         const d = await r.json()
-        if (!r.ok) throw new Error(d.error)
+        if (!r.ok) throw new Error(d.error || 'URL konnte nicht geladen werden')
         content = d.content
         title = d.title
 
@@ -207,7 +211,6 @@ export default function Home() {
       } else if (inputType === 'images') {
         if (imageFiles.length === 0) throw new Error('Bitte mindestens ein Foto oder Screenshot hochladen')
         setLoadingMsg(`${imageFiles.length} Bild(er) werden komprimiert…`)
-        // Komprimierung — alle parallel
         const compressed = await Promise.all(imageFiles.map(compressImage))
         content = `[${imageFiles.length} Bild(er) hochgeladen]`
         title = 'Foto-/Screenshot-Analyse'
@@ -270,7 +273,6 @@ export default function Home() {
 
   const handleApplyVoice = () => {
     let updatedArticle = article
-
     if (editedPerspective.trim()) {
       const lines = article.split('\n')
       let paragraphCount = 0
@@ -281,16 +283,12 @@ export default function Home() {
           if (paragraphCount === 2) { insertIndex = i + 1; break }
         }
       }
-      const quoteLine = `\n„${editedPerspective}"\n— Harald Sturm\n`
-      lines.splice(insertIndex, 0, quoteLine)
+      lines.splice(insertIndex, 0, `\n„${editedPerspective}"\n— Harald Sturm\n`)
       updatedArticle = lines.join('\n')
     }
-
     if (selectedLinks.length > 0) {
-      const linkBlock = '\n\n**Weiterführende Artikel:**\n' + selectedLinks.map(l => `- [${l.anchor}](${l.url})`).join('\n')
-      updatedArticle = updatedArticle + linkBlock
+      updatedArticle += '\n\n**Weiterführende Artikel:**\n' + selectedLinks.map(l => `- [${l.anchor}](${l.url})`).join('\n')
     }
-
     setArticle(updatedArticle)
     setCurrentStep(3)
     handleLoadImages()
@@ -452,7 +450,6 @@ export default function Home() {
         {/* ─── STEP 0: INPUT ─── */}
         {currentStep === 0 && !loading && (
           <div className="card">
-
             <div className="card-title"><span className="icon">💡</span> Hinweise <span style={{ fontSize: '0.75rem', fontWeight: '400', color: 'var(--text-muted)' }}>(optional)</span></div>
             <div style={{ fontSize: '0.82rem', color: 'var(--text-muted)', marginBottom: '0.6rem' }}>
               Kontext, Fokus, Zielgruppe oder spezielle Wünsche für diesen Artikel.
@@ -464,11 +461,7 @@ export default function Home() {
                 onChange={e => setHinweise(e.target.value)}
                 rows={3}
               />
-              <VoiceBtn
-                isRecording={isRecordingHinweise}
-                onStart={() => startVoice(setHinweise, setIsRecordingHinweise)}
-                onStop={() => stopVoice(setIsRecordingHinweise)}
-              />
+              <VoiceBtn isRecording={isRecordingHinweise} onStart={() => startVoice(setHinweise, setIsRecordingHinweise)} onStop={() => stopVoice(setIsRecordingHinweise)} />
             </div>
 
             <hr className="divider" style={{ margin: '0 0 1.5rem' }} />
@@ -485,14 +478,13 @@ export default function Home() {
               ))}
             </div>
 
-            {/* URL — type="text" verhindert Browser-Validierungsfehler */}
+            {/* URL — type="text" + eigene Validierung verhindert Safari-Rohfehler */}
             {inputType === 'url' && (
               <input
                 type="text"
                 placeholder="https://..."
                 value={urlInput}
                 onChange={e => setUrlInput(e.target.value)}
-                onBlur={e => { if (e.target.value.trim()) setUrlInput(normalizeUrl(e.target.value)) }}
                 onKeyDown={e => e.key === 'Enter' && handleGenerate()}
               />
             )}
@@ -507,7 +499,6 @@ export default function Home() {
               </div>
             )}
 
-            {/* Fotos / Screenshots — max. 10, automatisch komprimiert */}
             {inputType === 'images' && (
               <div>
                 <div style={{ fontSize: '0.8rem', color: 'var(--text-muted)', marginBottom: '0.6rem' }}>
@@ -541,33 +532,18 @@ export default function Home() {
                     </span>
                   )}
                 </div>
-
                 {imageFiles.length > 0 && (
                   <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(130px, 1fr))', gap: '8px', marginTop: '0.85rem' }}>
                     {imageFiles.map((file, i) => (
                       <div key={i} style={{ position: 'relative', borderRadius: '8px', overflow: 'hidden', aspectRatio: '4/3', border: '1px solid var(--border)' }}>
                         {/* eslint-disable-next-line @next/next/no-img-element */}
-                        <img
-                          src={URL.createObjectURL(file)}
-                          alt={file.name}
-                          style={{ width: '100%', height: '100%', objectFit: 'cover', display: 'block' }}
-                        />
+                        <img src={URL.createObjectURL(file)} alt={file.name} style={{ width: '100%', height: '100%', objectFit: 'cover', display: 'block' }} />
                         <button
                           onClick={e => { e.stopPropagation(); setImageFiles(prev => prev.filter((_, j) => j !== i)) }}
                           title="Entfernen"
-                          style={{
-                            position: 'absolute', top: '5px', right: '5px',
-                            background: 'rgba(0,0,0,0.65)', border: 'none', borderRadius: '50%',
-                            width: '22px', height: '22px', color: 'white', cursor: 'pointer',
-                            fontSize: '11px', display: 'flex', alignItems: 'center', justifyContent: 'center'
-                          }}
+                          style={{ position: 'absolute', top: '5px', right: '5px', background: 'rgba(0,0,0,0.65)', border: 'none', borderRadius: '50%', width: '22px', height: '22px', color: 'white', cursor: 'pointer', fontSize: '11px', display: 'flex', alignItems: 'center', justifyContent: 'center' }}
                         >✕</button>
-                        <div style={{
-                          position: 'absolute', bottom: 0, left: 0, right: 0,
-                          background: 'rgba(0,0,0,0.55)', padding: '3px 6px',
-                          fontSize: '0.62rem', color: 'rgba(255,255,255,0.85)',
-                          overflow: 'hidden', whiteSpace: 'nowrap', textOverflow: 'ellipsis'
-                        }}>{file.name}</div>
+                        <div style={{ position: 'absolute', bottom: 0, left: 0, right: 0, background: 'rgba(0,0,0,0.55)', padding: '3px 6px', fontSize: '0.62rem', color: 'rgba(255,255,255,0.85)', overflow: 'hidden', whiteSpace: 'nowrap', textOverflow: 'ellipsis' }}>{file.name}</div>
                       </div>
                     ))}
                   </div>
@@ -587,11 +563,7 @@ export default function Home() {
                     onChange={e => setTextInput(e.target.value)}
                     rows={5}
                   />
-                  <VoiceBtn
-                    isRecording={isRecordingText}
-                    onStart={() => startVoice(setTextInput, setIsRecordingText)}
-                    onStop={() => stopVoice(setIsRecordingText)}
-                  />
+                  <VoiceBtn isRecording={isRecordingText} onStart={() => startVoice(setTextInput, setIsRecordingText)} onStop={() => stopVoice(setIsRecordingText)} />
                 </div>
               </>
             )}
@@ -621,11 +593,7 @@ export default function Home() {
             <div className="card-title" style={{ marginBottom: '0.75rem' }}><span className="icon">💬</span> Feedback geben</div>
             <div className="feedback-row">
               <textarea placeholder="Was soll anders werden?" value={feedbackText} onChange={e => setFeedbackText(e.target.value)} rows={3} />
-              <VoiceBtn
-                isRecording={isRecordingFeedback}
-                onStart={() => startVoice(setFeedbackText, setIsRecordingFeedback)}
-                onStop={() => stopVoice(setIsRecordingFeedback)}
-              />
+              <VoiceBtn isRecording={isRecordingFeedback} onStart={() => startVoice(setFeedbackText, setIsRecordingFeedback)} onStop={() => stopVoice(setIsRecordingFeedback)} />
             </div>
             <div className="btn-row">
               <button className="btn btn-primary" onClick={handleFeedback} disabled={loading || !feedbackText.trim()}>🔄 Neue Version</button>
@@ -642,7 +610,6 @@ export default function Home() {
             <div style={{ fontSize: '0.85rem', color: 'var(--text-muted)', marginBottom: '1.25rem' }}>
               Wähle einen Perspektiv-Vorschlag, bearbeite ihn — er wird in den Artikel eingebaut.
             </div>
-
             {perspectives.map((p, i) => (
               <div key={i} onClick={() => { setSelectedPerspective(i); setEditedPerspective(p) }}
                 style={{ background: selectedPerspective === i ? 'rgba(2,133,206,0.12)' : 'rgba(255,255,255,0.04)', border: `1px solid ${selectedPerspective === i ? 'var(--blue)' : 'var(--border)'}`, borderRadius: '10px', padding: '1rem', marginBottom: '0.75rem', cursor: 'pointer', transition: 'all 0.15s' }}>
@@ -652,15 +619,13 @@ export default function Home() {
                 <div style={{ fontSize: '0.88rem', lineHeight: '1.6', color: 'rgba(255,255,255,0.85)' }}>{p || '—'}</div>
               </div>
             ))}
-
             {selectedPerspective !== null && (
               <div style={{ marginTop: '1rem' }}>
                 <div style={{ fontSize: '0.72rem', fontWeight: '700', textTransform: 'uppercase', color: 'var(--text-muted)', marginBottom: '0.4rem' }}>✏️ Bearbeiten</div>
                 <textarea value={editedPerspective} onChange={e => setEditedPerspective(e.target.value)} rows={4} style={{ resize: 'vertical' }} />
               </div>
             )}
-
-            {/* Interne Links — wird bei Foto-Input NICHT angezeigt */}
+            {/* Interne Links — nur bei URL/PDF/Text, nicht bei Foto-Upload */}
             {inputType !== 'images' && internalLinks.length > 0 && (
               <>
                 <hr className="divider" />
@@ -674,7 +639,6 @@ export default function Home() {
                 ))}
               </>
             )}
-
             <div className="btn-row" style={{ marginTop: '1.5rem' }}>
               <button className="btn btn-primary" onClick={handleApplyVoice} disabled={loading}>
                 {editedPerspective.trim() || selectedLinks.length > 0 ? '✅ Einbauen & weiter zu Bild' : '⏭ Überspringen → Bild'}
@@ -727,18 +691,10 @@ export default function Home() {
               <div style={{ color: '#006621', fontSize: '0.78rem', marginBottom: '0.2rem', fontFamily: 'arial, sans-serif' }}>branddoc.at › blog › {seoSlug || 'url-slug'}</div>
               <div style={{ color: '#545454', fontSize: '0.82rem', fontFamily: 'arial, sans-serif', lineHeight: '1.4' }}>{seoDescription || 'Meta Description…'}</div>
             </div>
-
             <div style={{ display: 'flex', gap: '10px', marginBottom: '1rem' }}>
-              <button
-                onClick={() => setPublishMode('live')}
-                style={{ flex: 1, padding: '0.75rem', borderRadius: '8px', border: `2px solid ${publishMode === 'live' ? 'var(--blue)' : 'var(--border)'}`, background: publishMode === 'live' ? 'rgba(2,133,206,0.15)' : 'transparent', color: publishMode === 'live' ? 'var(--white)' : 'var(--text-muted)', cursor: 'pointer', fontFamily: 'var(--font-display)', fontWeight: '700', fontSize: '0.85rem', transition: 'all 0.15s' }}
-              >🚀 Direkt live</button>
-              <button
-                onClick={() => setPublishMode('draft')}
-                style={{ flex: 1, padding: '0.75rem', borderRadius: '8px', border: `2px solid ${publishMode === 'draft' ? 'var(--blue)' : 'var(--border)'}`, background: publishMode === 'draft' ? 'rgba(2,133,206,0.15)' : 'transparent', color: publishMode === 'draft' ? 'var(--white)' : 'var(--text-muted)', cursor: 'pointer', fontFamily: 'var(--font-display)', fontWeight: '700', fontSize: '0.85rem', transition: 'all 0.15s' }}
-              >📝 Als Entwurf</button>
+              <button onClick={() => setPublishMode('live')} style={{ flex: 1, padding: '0.75rem', borderRadius: '8px', border: `2px solid ${publishMode === 'live' ? 'var(--blue)' : 'var(--border)'}`, background: publishMode === 'live' ? 'rgba(2,133,206,0.15)' : 'transparent', color: publishMode === 'live' ? 'var(--white)' : 'var(--text-muted)', cursor: 'pointer', fontFamily: 'var(--font-display)', fontWeight: '700', fontSize: '0.85rem', transition: 'all 0.15s' }}>🚀 Direkt live</button>
+              <button onClick={() => setPublishMode('draft')} style={{ flex: 1, padding: '0.75rem', borderRadius: '8px', border: `2px solid ${publishMode === 'draft' ? 'var(--blue)' : 'var(--border)'}`, background: publishMode === 'draft' ? 'rgba(2,133,206,0.15)' : 'transparent', color: publishMode === 'draft' ? 'var(--white)' : 'var(--text-muted)', cursor: 'pointer', fontFamily: 'var(--font-display)', fontWeight: '700', fontSize: '0.85rem', transition: 'all 0.15s' }}>📝 Als Entwurf</button>
             </div>
-
             <div className="btn-row">
               <button className="btn btn-publish" onClick={handlePublish} disabled={loading || !selectedImage}>
                 {publishMode === 'draft' ? '📝 Als Entwurf speichern' : '🚀 Jetzt auf Wix veröffentlichen'}
