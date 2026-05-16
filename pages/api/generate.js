@@ -75,16 +75,15 @@ INTERNAL_LINK_2: TITLE|URL|ANKERTEXT
 Bestehende Artikel auf branddoc.at:
 ${articleList}`
 
-  // --- Build the user message (string or multipart array) ---
+  // Build the user message — string für Text, Array für Vision (Bilder)
   let messageContent
 
   if (feedback && previousArticle) {
-    // Feedback / revision iteration — always text-only
+    // Feedback-Iteration — immer Text
     messageContent = `Hier ist der bisherige Blogartikel:\n\n${previousArticle}\n\n---\n\nHaralds Feedback:\n${feedback}\n\nBitte überarbeite den Artikel entsprechend. Behalte was gut ist, ändere was Harald kritisiert hat.`
 
   } else if (inputType === 'images' && Array.isArray(images) && images.length > 0) {
-    // ── NEW: Vision / Screenshot path ──────────────────────────────────────
-    // Validate images: each entry must have { data: string, mediaType: string }
+    // Vision-Pfad: Bilder + Textanweisung
     const allowedTypes = ['image/jpeg', 'image/png', 'image/webp', 'image/gif']
     const validImages = images.filter(
       img => img && typeof img.data === 'string' && img.data.length > 0 && allowedTypes.includes(img.mediaType)
@@ -94,7 +93,6 @@ ${articleList}`
       return res.status(400).json({ error: 'Keine gültigen Bilder übergeben (erlaubt: JPG, PNG, WEBP, GIF).' })
     }
 
-    // Build multipart content: images first, instruction text last
     messageContent = [
       ...validImages.map(img => ({
         type: 'image',
@@ -114,7 +112,6 @@ ${articleList}`
         ].join(' ')
       }
     ]
-    // ── End Vision path ────────────────────────────────────────────────────
 
   } else if (inputType === 'direkt') {
     messageContent = `Schreibe einen Blogartikel für brandDOC.at basierend auf diesem Thema/Prompt:\n\n${sourceContent}${hinweise ? `\n\nZusätzliche Hinweise von Harald:\n${hinweise}` : ''}`
@@ -144,7 +141,6 @@ ${sourceContent}`
         messages: [
           {
             role: 'user',
-            // messageContent is either a plain string or an array of content blocks (vision)
             content: messageContent
           }
         ]
