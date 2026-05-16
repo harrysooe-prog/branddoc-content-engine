@@ -6,6 +6,29 @@ const MAX_IMAGES = 10
 const MAX_PX = 1200
 const JPEG_QUALITY = 0.75
 
+// Rohe Browser-Fehlermeldungen (vor allem iOS Safari) in lesbares Deutsch uebersetzen
+function sanitizeError(err) {
+  const msg = (err && err.message) ? err.message : String(err)
+  if (
+    msg.includes('did not match the expected pattern') ||
+    msg.includes('Invalid URL') ||
+    msg.includes('Failed to construct') ||
+    msg.includes('is not a valid URL')
+  ) {
+    return 'Die URL ist nicht gueltig. Bitte eine vollstaendige Adresse eingeben (z.B. https://beispiel.at/artikel)'
+  }
+  if (msg.includes('Body exceeded') || msg.includes('body size') || msg.includes('PayloadTooLarge')) {
+    return 'Die Bilder sind zu gross. Bitte weniger oder kleinere Bilder auswaehlen.'
+  }
+  if (msg.includes('Unexpected token') || msg.includes('not valid JSON') || msg.includes('JSON')) {
+    return 'Server-Fehler. Bitte erneut versuchen.'
+  }
+  if (msg.includes('NetworkError') || msg.includes('Failed to fetch') || msg.includes('network')) {
+    return 'Keine Verbindung. Bitte Internetverbindung pruefen und erneut versuchen.'
+  }
+  return msg
+}
+
 export default function Home() {
   const [currentStep, setCurrentStep] = useState(0)
   const [inputType, setInputType] = useState('url')
@@ -115,18 +138,18 @@ export default function Home() {
     setRecording(false)
   }, [])
 
-  const normalizeAndValidateUrl = (raw) => {
+  // URL normalisieren und validieren — fange Safari-Fehler fruehzeitig ab
+  const normalizeUrl = (raw) => {
     const trimmed = raw.trim()
     if (!trimmed) throw new Error('Bitte eine URL eingeben')
     const withScheme = /^https?:\/\//i.test(trimmed) ? trimmed : 'https://' + trimmed
-    try {
-      new URL(withScheme)
-    } catch (_) {
-      throw new Error('Bitte eine gueltige URL eingeben - z.B. https://beispiel.at/artikel')
+    try { new URL(withScheme) } catch (_) {
+      throw new Error('Die URL ist nicht gueltig. Bitte eine vollstaendige Adresse eingeben (z.B. https://beispiel.at/artikel)')
     }
     return withScheme
   }
 
+  // Bild komprimieren: max 1200px, JPEG 75% — reduziert 5MB PNGs auf ~100-200KB
   const compressImage = (file) => new Promise((resolve, reject) => {
     const reader = new FileReader()
     reader.onerror = () => reject(new Error('Bild konnte nicht gelesen werden'))
@@ -137,14 +160,13 @@ export default function Home() {
         let { width, height } = img
         if (width > MAX_PX || height > MAX_PX) {
           if (width >= height) { height = Math.round(height * MAX_PX / width); width = MAX_PX }
-          else                 { width = Math.round(width * MAX_PX / height); height = MAX_PX }
+          else { width = Math.round(width * MAX_PX / height); height = MAX_PX }
         }
         const canvas = document.createElement('canvas')
         canvas.width = width
         canvas.height = height
         canvas.getContext('2d').drawImage(img, 0, 0, width, height)
-        const dataUrl = canvas.toDataURL('image/jpeg', JPEG_QUALITY)
-        resolve({ data: dataUrl.split(',')[1], mediaType: 'image/jpeg' })
+        resolve({ data: canvas.toDataURL('image/jpeg', JPEG_QUALITY).split(',')[1], mediaType: 'image/jpeg' })
       }
       img.src = e.target.result
     }
@@ -157,10 +179,7 @@ export default function Home() {
     if (valid.length < files.length) setError('Nur JPG, PNG, WEBP und GIF werden unterstuetzt.')
     setImageFiles(prev => {
       const combined = [...prev, ...valid]
-      if (combined.length > MAX_IMAGES) {
-        setError('Maximal ' + MAX_IMAGES + ' Bilder erlaubt.')
-        return combined.slice(0, MAX_IMAGES)
-      }
+      if (combined.length > MAX_IMAGES) { setError('Maximal ' + MAX_IMAGES + ' Bilder erlaubt.'); return combined.slice(0, MAX_IMAGES) }
       return combined
     })
   }
@@ -179,16 +198,23 @@ export default function Home() {
 
     try {
       if (inputType === 'url') {
-        const url = normalizeAndValidateUrl(urlInput)
+        // normalizeUrl wirft bei ungueltigem Input bereits einen deutschen Fehler
+        const url = normalizeUrl(urlInput)
         setUrlInput(url)
         setLoadingMsg('URL wird geladen...')
-        const r = await fetch('/api/fetch-url', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ url })
-        })
-        const d = await r.json()
-        if (!r.ok) throw new Error(d.error || 'URL konnte nicht geladen werden')
+        let r, d
+        try {
+          r = await fetch('/api/fetch-url', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ url })
+          })
+          d = await r.json()
+        } catch (fetchErr) {
+          throw new Error(sanitizeError(fetchErr))
+        }
+        // API-Fehlermeldungen ebenfalls bereinigen
+        if (!r.ok) throw new Error(sanitizeError({ message: d.error || 'URL konnte nicht geladen werden' }))
         content = d.content
         title = d.title
 
@@ -223,7 +249,8 @@ export default function Home() {
       await generateArticle(content, title, null, null, resolvedInputType)
 
     } catch (err) {
-      setError(err.message)
+      // Letzter Sicherheitsnetz: alle noch nicht abgefangenen Rohfehler uebersetzen
+      setError(sanitizeError(err))
     } finally {
       setLoading(false)
       setLoadingMsg('')
@@ -231,21 +258,26 @@ export default function Home() {
   }
 
   const generateArticle = async (srcContent, srcTitle, feedback, prevArticle, resolvedType, imgs) => {
-    const r = await fetch('/api/generate', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        sourceContent: srcContent || sourceContent,
-        sourceTitle: srcTitle || sourceTitle,
-        inputType: resolvedType || inputType,
-        feedback,
-        previousArticle: prevArticle,
-        hinweise: hinweise.trim() || undefined,
-        images: imgs || undefined
+    let r, d
+    try {
+      r = await fetch('/api/generate', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          sourceContent: srcContent || sourceContent,
+          sourceTitle: srcTitle || sourceTitle,
+          inputType: resolvedType || inputType,
+          feedback,
+          previousArticle: prevArticle,
+          hinweise: hinweise.trim() || undefined,
+          images: imgs || undefined
+        })
       })
-    })
-    const d = await r.json()
-    if (!r.ok) throw new Error(d.error)
+      d = await r.json()
+    } catch (fetchErr) {
+      throw new Error(sanitizeError(fetchErr))
+    }
+    if (!r.ok) throw new Error(sanitizeError({ message: d.error || 'Generierung fehlgeschlagen' }))
     setArticle(d.article)
     setSeoTitle(d.seoTitle)
     setSeoDescription(d.seoDescription)
@@ -273,7 +305,7 @@ export default function Home() {
           if (paragraphCount === 2) { insertIndex = i + 1; break }
         }
       }
-      lines.splice(insertIndex, 0, '\n' + String.fromCharCode(8222) + editedPerspective + String.fromCharCode(8220) + '\n\u2014 Harald Sturm\n')
+      lines.splice(insertIndex, 0, '\n\u201e' + editedPerspective + '\u201c\n\u2014 Harald Sturm\n')
       updatedArticle = lines.join('\n')
     }
     if (selectedLinks.length > 0) {
@@ -294,7 +326,7 @@ export default function Home() {
       setFeedbackText('')
       setCurrentStep(1)
     } catch (err) {
-      setError(err.message)
+      setError(sanitizeError(err))
     } finally {
       setLoading(false)
       setLoadingMsg('')
@@ -315,7 +347,7 @@ export default function Home() {
       setImages(d.images)
       setCurrentStep(3)
     } catch (err) {
-      setError(err.message)
+      setError(sanitizeError(err))
     } finally {
       setImagesLoading(false)
     }
@@ -335,12 +367,12 @@ export default function Home() {
       const rawText = await r.text()
       let d = {}
       try { d = JSON.parse(rawText) } catch (_) { throw new Error('Wix API: Ungueltige Antwort - ' + rawText.slice(0, 200)) }
-      if (!r.ok) throw new Error(d.error + (d.detail ? ': ' + d.detail : ''))
+      if (!r.ok) throw new Error(sanitizeError({ message: d.error + (d.detail ? ': ' + d.detail : '') }))
       setPublished(true)
       setPublishedUrl(d.postUrl || '')
       setCurrentStep(4)
     } catch (err) {
-      setError(err.message)
+      setError(sanitizeError(err))
     } finally {
       setLoading(false)
       setLoadingMsg('')
@@ -391,20 +423,19 @@ export default function Home() {
   const handleFileDrop = (e) => {
     e.preventDefault()
     const file = e.dataTransfer.files[0]
-    if (file?.type === 'application/pdf') setPdfFile(file)
+    if (file && file.type === 'application/pdf') setPdfFile(file)
   }
 
   const toggleLink = (link) => {
     setSelectedLinks(prev => prev.find(l => l.url === link.url) ? prev.filter(l => l.url !== link.url) : [...prev, link])
   }
 
-  const VoiceBtn = ({ isRecording, onStart, onStop, small }) => (
+  const VoiceBtn = ({ isRecording, onStart, onStop }) => (
     voiceSupported ? (
       <button
-        className={`voice-btn ${isRecording ? 'recording' : ''}`}
+        className={isRecording ? 'voice-btn recording' : 'voice-btn'}
         onClick={isRecording ? onStop : onStart}
         title={isRecording ? 'Aufnahme stoppen' : 'Spracheingabe'}
-        style={small ? { width: '38px', height: '38px', fontSize: '1rem' } : {}}
       >
         {isRecording ? '\u23F9' : '\uD83C\uDF99'}
       </button>
@@ -416,7 +447,6 @@ export default function Home() {
       <Head>
         <title>brandDOC Content Engine</title>
         <meta name="viewport" content="width=device-width, initial-scale=1" />
-        <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>&#x270D;&#xFE0F;</text></svg>" />
       </Head>
 
       <div className="app">
@@ -430,17 +460,29 @@ export default function Home() {
 
         <div className="steps">
           {STEPS.map((s, i) => (
-            <div key={s} className={`step ${i === currentStep ? 'active' : ''} ${i < currentStep ? 'done' : ''}`}>{s}</div>
+            <div key={s} className={'step' + (i === currentStep ? ' active' : '') + (i < currentStep ? ' done' : '')}>{s}</div>
           ))}
         </div>
 
-        {error && <div className="status error"><span>&#9888;&#65039;</span> {error}</div>}
-        {loading && <div className="status loading"><div className="spinner" />{loadingMsg || 'Einen Moment...'}</div>}
+        {error && (
+          <div className="status error">
+            <span>&#9888;</span> {error}
+          </div>
+        )}
+        {loading && (
+          <div className="status loading">
+            <div className="spinner" />
+            {loadingMsg || 'Einen Moment...'}
+          </div>
+        )}
 
         {/* STEP 0: INPUT */}
         {currentStep === 0 && !loading && (
           <div className="card">
-            <div className="card-title"><span className="icon">&#128161;</span> Hinweise <span style={{ fontSize: '0.75rem', fontWeight: '400', color: 'var(--text-muted)' }}>(optional)</span></div>
+            <div className="card-title">
+              <span className="icon">&#128161;</span> Hinweise
+              <span style={{ fontSize: '0.75rem', fontWeight: '400', color: 'var(--text-muted)', marginLeft: '6px' }}>(optional)</span>
+            </div>
             <div style={{ fontSize: '0.82rem', color: 'var(--text-muted)', marginBottom: '0.6rem' }}>
               Kontext, Fokus, Zielgruppe oder spezielle Wuensche fuer diesen Artikel.
             </div>
@@ -458,14 +500,10 @@ export default function Home() {
 
             <div className="card-title"><span className="icon">&#128229;</span> Content-Quelle</div>
             <div className="input-tabs">
-              {[
-                { id: 'url',    label: '&#128279; URL / Artikel' },
-                { id: 'pdf',    label: '&#128196; PDF' },
-                { id: 'images', label: '&#128247; Fotos / Screenshots' },
-                { id: 'text',   label: '&#128173; Direkt schreiben' }
-              ].map(t => (
-                <button key={t.id} className={`input-tab ${inputType === t.id ? 'active' : ''}`} onClick={() => setInputType(t.id)} dangerouslySetInnerHTML={{ __html: t.label }} />
-              ))}
+              <button className={inputType === 'url' ? 'input-tab active' : 'input-tab'} onClick={() => setInputType('url')}>&#128279; URL / Artikel</button>
+              <button className={inputType === 'pdf' ? 'input-tab active' : 'input-tab'} onClick={() => setInputType('pdf')}>&#128196; PDF</button>
+              <button className={inputType === 'images' ? 'input-tab active' : 'input-tab'} onClick={() => setInputType('images')}>&#128247; Fotos / Screenshots</button>
+              <button className={inputType === 'text' ? 'input-tab active' : 'input-tab'} onClick={() => setInputType('text')}>&#128173; Direkt schreiben</button>
             </div>
 
             {inputType === 'url' && (
@@ -479,7 +517,12 @@ export default function Home() {
             )}
 
             {inputType === 'pdf' && (
-              <div className={`upload-area ${pdfFile ? 'dragover' : ''}`} onDrop={handleFileDrop} onDragOver={e => e.preventDefault()} onClick={() => fileInputRef.current?.click()}>
+              <div
+                className={pdfFile ? 'upload-area dragover' : 'upload-area'}
+                onDrop={handleFileDrop}
+                onDragOver={e => e.preventDefault()}
+                onClick={() => fileInputRef.current && fileInputRef.current.click()}
+              >
                 <input ref={fileInputRef} type="file" accept=".pdf" onChange={e => setPdfFile(e.target.files[0])} />
                 {pdfFile
                   ? <span style={{ color: 'var(--blue-light)' }}>&#9989; {pdfFile.name}</span>
@@ -491,15 +534,15 @@ export default function Home() {
             {inputType === 'images' && (
               <div>
                 <div style={{ fontSize: '0.8rem', color: 'var(--text-muted)', marginBottom: '0.6rem' }}>
-                  Fotos, Screenshots, Slides oder Scans &mdash; Claude analysiert die Bilder und schreibt den Artikel daraus.
-                  Bis zu {MAX_IMAGES} Bilder (JPG, PNG, WEBP) &middot; werden automatisch komprimiert.
+                  Fotos, Screenshots, Slides oder Scans. Claude analysiert die Bilder und schreibt den Artikel daraus.
+                  Bis zu {MAX_IMAGES} Bilder (JPG, PNG, WEBP). Werden automatisch komprimiert.
                 </div>
                 <div
-                  className={`upload-area ${imageFiles.length > 0 ? 'dragover' : ''}`}
+                  className={imageFiles.length > 0 ? 'upload-area dragover' : 'upload-area'}
                   style={{ minHeight: '110px' }}
                   onDrop={handleImageDrop}
                   onDragOver={e => e.preventDefault()}
-                  onClick={() => imageInputRef.current?.click()}
+                  onClick={() => imageInputRef.current && imageInputRef.current.click()}
                 >
                   <input
                     ref={imageInputRef}
@@ -512,12 +555,14 @@ export default function Home() {
                     <>
                       <div style={{ fontSize: '2rem', marginBottom: '0.5rem' }}>&#128247;</div>
                       Bilder hier hinziehen oder klicken<br />
-                      <span style={{ fontSize: '0.72rem', color: 'var(--text-muted)' }}>JPG &middot; PNG &middot; WEBP &mdash; max. {MAX_IMAGES} Bilder</span>
+                      <span style={{ fontSize: '0.72rem', color: 'var(--text-muted)' }}>JPG, PNG, WEBP - max. {MAX_IMAGES} Bilder</span>
                     </>
                   ) : (
                     <span style={{ color: 'var(--blue-light)' }}>
-                      &#9989; {imageFiles.length}/{MAX_IMAGES} Bild{imageFiles.length > 1 ? 'er' : ''} ausgewaehlt
-                      {imageFiles.length < MAX_IMAGES && <span style={{ color: 'var(--text-muted)', fontSize: '0.78rem' }}> &mdash; klicken um weitere hinzuzufuegen</span>}
+                      &#9989; {imageFiles.length}/{MAX_IMAGES} {imageFiles.length === 1 ? 'Bild' : 'Bilder'} ausgewaehlt
+                      {imageFiles.length < MAX_IMAGES && (
+                        <span style={{ color: 'var(--text-muted)', fontSize: '0.78rem' }}> - klicken um weitere hinzuzufuegen</span>
+                      )}
                     </span>
                   )}
                 </div>
@@ -531,7 +576,7 @@ export default function Home() {
                           onClick={e => { e.stopPropagation(); setImageFiles(prev => prev.filter((_, j) => j !== i)) }}
                           title="Entfernen"
                           style={{ position: 'absolute', top: '5px', right: '5px', background: 'rgba(0,0,0,0.65)', border: 'none', borderRadius: '50%', width: '22px', height: '22px', color: 'white', cursor: 'pointer', fontSize: '11px', display: 'flex', alignItems: 'center', justifyContent: 'center' }}
-                        >&#x2715;</button>
+                        >x</button>
                         <div style={{ position: 'absolute', bottom: 0, left: 0, right: 0, background: 'rgba(0,0,0,0.55)', padding: '3px 6px', fontSize: '0.62rem', color: 'rgba(255,255,255,0.85)', overflow: 'hidden', whiteSpace: 'nowrap', textOverflow: 'ellipsis' }}>{file.name}</div>
                       </div>
                     ))}
@@ -543,7 +588,7 @@ export default function Home() {
             {inputType === 'text' && (
               <>
                 <div style={{ fontSize: '0.8rem', color: 'var(--text-muted)', marginBottom: '0.5rem' }}>
-                  Thema, Idee, eigener Text &mdash; oder direkt per Stimme einsprechen.
+                  Thema, Idee, eigener Text oder direkt per Stimme einsprechen.
                 </div>
                 <div className="feedback-row">
                   <textarea
@@ -558,7 +603,9 @@ export default function Home() {
             )}
 
             <div className="btn-row">
-              <button className="btn btn-primary" onClick={handleGenerate} disabled={loading}>&#9997;&#65039; Artikel generieren</button>
+              <button className="btn btn-primary" onClick={handleGenerate} disabled={loading}>
+                Artikel generieren
+              </button>
             </div>
           </div>
         )}
@@ -570,7 +617,7 @@ export default function Home() {
               <span className="icon">&#128221;</span> Artikel
               {iteration > 0 && <span className="iteration-badge" style={{ marginLeft: 'auto' }}>Version {iteration}</span>}
             </div>
-            <div style={{ fontSize: '0.75rem', color: 'var(--text-muted)', marginBottom: '0.5rem' }}>&#9999;&#65039; Direkt bearbeitbar</div>
+            <div style={{ fontSize: '0.75rem', color: 'var(--text-muted)', marginBottom: '0.5rem' }}>Direkt bearbeitbar</div>
             <textarea value={article} onChange={e => setArticle(e.target.value)} rows={20} style={{ resize: 'vertical' }} />
             {speechSupported && (
               <div className="tts-bar">
@@ -585,9 +632,9 @@ export default function Home() {
               <VoiceBtn isRecording={isRecordingFeedback} onStart={() => startVoice(setFeedbackText, setIsRecordingFeedback)} onStop={() => stopVoice(setIsRecordingFeedback)} />
             </div>
             <div className="btn-row">
-              <button className="btn btn-primary" onClick={handleFeedback} disabled={loading || !feedbackText.trim()}>&#128260; Neue Version</button>
-              <button className="btn btn-secondary" onClick={() => setCurrentStep(2)}>&#9989; Passt - weiter zu Stimme</button>
-              <button className="btn btn-secondary" onClick={handleReset}>&#8617; Von vorne</button>
+              <button className="btn btn-primary" onClick={handleFeedback} disabled={loading || !feedbackText.trim()}>Neue Version</button>
+              <button className="btn btn-secondary" onClick={() => setCurrentStep(2)}>Passt - weiter zu Stimme</button>
+              <button className="btn btn-secondary" onClick={handleReset}>Von vorne</button>
             </div>
           </div>
         )}
@@ -597,20 +644,23 @@ export default function Home() {
           <div className="card">
             <div className="card-title"><span className="icon">&#127897;</span> Deine Stimme</div>
             <div style={{ fontSize: '0.85rem', color: 'var(--text-muted)', marginBottom: '1.25rem' }}>
-              Waehle einen Perspektiv-Vorschlag, bearbeite ihn &mdash; er wird in den Artikel eingebaut.
+              Waehle einen Perspektiv-Vorschlag, bearbeite ihn. Er wird in den Artikel eingebaut.
             </div>
             {perspectives.map((p, i) => (
-              <div key={i} onClick={() => { setSelectedPerspective(i); setEditedPerspective(p) }}
-                style={{ background: selectedPerspective === i ? 'rgba(2,133,206,0.12)' : 'rgba(255,255,255,0.04)', border: '1px solid ' + (selectedPerspective === i ? 'var(--blue)' : 'var(--border)'), borderRadius: '10px', padding: '1rem', marginBottom: '0.75rem', cursor: 'pointer', transition: 'all 0.15s' }}>
+              <div
+                key={i}
+                onClick={() => { setSelectedPerspective(i); setEditedPerspective(p) }}
+                style={{ background: selectedPerspective === i ? 'rgba(2,133,206,0.12)' : 'rgba(255,255,255,0.04)', border: '1px solid ' + (selectedPerspective === i ? 'var(--blue)' : 'var(--border)'), borderRadius: '10px', padding: '1rem', marginBottom: '0.75rem', cursor: 'pointer', transition: 'all 0.15s' }}
+              >
                 <div style={{ fontSize: '0.7rem', fontWeight: '700', textTransform: 'uppercase', color: 'var(--blue-light)', marginBottom: '0.4rem', letterSpacing: '0.06em' }}>
-                  {i === 0 ? '&#128172; Persoenlich & direkt' : i === 1 ? '&#9889; Provokant & fordernd' : '&#127981; Praxis & KMU'}
+                  {i === 0 ? 'Persoenlich & direkt' : i === 1 ? 'Provokant & fordernd' : 'Praxis & KMU'}
                 </div>
-                <div style={{ fontSize: '0.88rem', lineHeight: '1.6', color: 'rgba(255,255,255,0.85)' }}>{p || '&#8212;'}</div>
+                <div style={{ fontSize: '0.88rem', lineHeight: '1.6', color: 'rgba(255,255,255,0.85)' }}>{p || '-'}</div>
               </div>
             ))}
             {selectedPerspective !== null && (
               <div style={{ marginTop: '1rem' }}>
-                <div style={{ fontSize: '0.72rem', fontWeight: '700', textTransform: 'uppercase', color: 'var(--text-muted)', marginBottom: '0.4rem' }}>&#9999;&#65039; Bearbeiten</div>
+                <div style={{ fontSize: '0.72rem', fontWeight: '700', textTransform: 'uppercase', color: 'var(--text-muted)', marginBottom: '0.4rem' }}>Bearbeiten</div>
                 <textarea value={editedPerspective} onChange={e => setEditedPerspective(e.target.value)} rows={4} style={{ resize: 'vertical' }} />
               </div>
             )}
@@ -619,8 +669,11 @@ export default function Home() {
                 <hr className="divider" />
                 <div className="card-title" style={{ marginBottom: '0.75rem' }}><span className="icon">&#128279;</span> Interne Verlinkungen</div>
                 {internalLinks.map((link, i) => (
-                  <div key={i} onClick={() => toggleLink(link)}
-                    style={{ background: selectedLinks.find(l => l.url === link.url) ? 'rgba(2,133,206,0.12)' : 'rgba(255,255,255,0.04)', border: '1px solid ' + (selectedLinks.find(l => l.url === link.url) ? 'var(--blue)' : 'var(--border)'), borderRadius: '8px', padding: '0.75rem 1rem', marginBottom: '0.5rem', cursor: 'pointer', transition: 'all 0.15s' }}>
+                  <div
+                    key={i}
+                    onClick={() => toggleLink(link)}
+                    style={{ background: selectedLinks.find(l => l.url === link.url) ? 'rgba(2,133,206,0.12)' : 'rgba(255,255,255,0.04)', border: '1px solid ' + (selectedLinks.find(l => l.url === link.url) ? 'var(--blue)' : 'var(--border)'), borderRadius: '8px', padding: '0.75rem 1rem', marginBottom: '0.5rem', cursor: 'pointer', transition: 'all 0.15s' }}
+                  >
                     <div style={{ fontSize: '0.82rem', color: 'var(--white)', marginBottom: '0.2rem' }}>&#128196; {link.title}</div>
                     <div style={{ fontSize: '0.75rem', color: 'var(--blue-light)' }}>Ankertext: {link.anchor}</div>
                   </div>
@@ -629,9 +682,9 @@ export default function Home() {
             )}
             <div className="btn-row" style={{ marginTop: '1.5rem' }}>
               <button className="btn btn-primary" onClick={handleApplyVoice} disabled={loading}>
-                {editedPerspective.trim() || selectedLinks.length > 0 ? '&#9989; Einbauen & weiter zu Bild' : '&#9197; Ueberspringen - Bild'}
+                {(editedPerspective.trim() || selectedLinks.length > 0) ? 'Einbauen und weiter zu Bild' : 'Ueberspringen - weiter zu Bild'}
               </button>
-              <button className="btn btn-secondary" onClick={() => setCurrentStep(1)}>&#8592; Zurueck</button>
+              <button className="btn btn-secondary" onClick={() => setCurrentStep(1)}>Zurueck</button>
             </div>
           </div>
         )}
@@ -645,7 +698,7 @@ export default function Home() {
               <>
                 <div className="image-grid">
                   {images.map(img => (
-                    <div key={img.id} className={`image-option ${selectedImage?.id === img.id ? 'selected' : ''}`} onClick={() => setSelectedImage(img)}>
+                    <div key={img.id} className={selectedImage && selectedImage.id === img.id ? 'image-option selected' : 'image-option'} onClick={() => setSelectedImage(img)}>
                       {/* eslint-disable-next-line @next/next/no-img-element */}
                       <img src={img.thumb} alt={img.alt} />
                       <div className="check">&#10003;</div>
@@ -653,7 +706,9 @@ export default function Home() {
                   ))}
                 </div>
                 {selectedImage && (
-                  <div className="image-credit">Foto: <a href={selectedImage.authorUrl} target="_blank" rel="noopener noreferrer" style={{ color: 'var(--blue-light)' }}>{selectedImage.author}</a> via Unsplash</div>
+                  <div className="image-credit">
+                    Foto: <a href={selectedImage.authorUrl} target="_blank" rel="noopener noreferrer" style={{ color: 'var(--blue-light)' }}>{selectedImage.author}</a> via Unsplash
+                  </div>
                 )}
               </>
             )}
@@ -672,7 +727,7 @@ export default function Home() {
               <input type="text" value={seoSlug} onChange={e => setSeoSlug(e.target.value.toLowerCase().replace(/\s+/g, '-'))} placeholder="url-slug" style={{ fontFamily: 'monospace' }} />
             </div>
             <div style={{ marginBottom: '1.5rem' }}>
-              <div style={{ fontSize: '0.72rem', fontWeight: '700', textTransform: 'uppercase', letterSpacing: '0.06em', color: 'var(--text-muted)', marginBottom: '0.4rem' }}>&#127919; Fokus-Keyword</div>
+              <div style={{ fontSize: '0.72rem', fontWeight: '700', textTransform: 'uppercase', letterSpacing: '0.06em', color: 'var(--text-muted)', marginBottom: '0.4rem' }}>Fokus-Keyword</div>
               <input type="text" value={focusKeyword} onChange={e => setFocusKeyword(e.target.value)} placeholder="z.B. Markenpositionierung KMU" />
             </div>
             <div style={{ background: 'white', borderRadius: '8px', padding: '1rem 1.25rem', marginBottom: '1.5rem' }}>
@@ -682,12 +737,22 @@ export default function Home() {
               <div style={{ color: '#545454', fontSize: '0.82rem', fontFamily: 'arial, sans-serif', lineHeight: '1.4' }}>{seoDescription || 'Meta Description...'}</div>
             </div>
             <div style={{ display: 'flex', gap: '10px', marginBottom: '1rem' }}>
-              <button onClick={() => setPublishMode('live')} style={{ flex: 1, padding: '0.75rem', borderRadius: '8px', border: '2px solid ' + (publishMode === 'live' ? 'var(--blue)' : 'var(--border)'), background: publishMode === 'live' ? 'rgba(2,133,206,0.15)' : 'transparent', color: publishMode === 'live' ? 'var(--white)' : 'var(--text-muted)', cursor: 'pointer', fontFamily: 'var(--font-display)', fontWeight: '700', fontSize: '0.85rem', transition: 'all 0.15s' }}>&#128640; Direkt live</button>
-              <button onClick={() => setPublishMode('draft')} style={{ flex: 1, padding: '0.75rem', borderRadius: '8px', border: '2px solid ' + (publishMode === 'draft' ? 'var(--blue)' : 'var(--border)'), background: publishMode === 'draft' ? 'rgba(2,133,206,0.15)' : 'transparent', color: publishMode === 'draft' ? 'var(--white)' : 'var(--text-muted)', cursor: 'pointer', fontFamily: 'var(--font-display)', fontWeight: '700', fontSize: '0.85rem', transition: 'all 0.15s' }}>&#128221; Als Entwurf</button>
+              <button
+                onClick={() => setPublishMode('live')}
+                style={{ flex: 1, padding: '0.75rem', borderRadius: '8px', border: '2px solid ' + (publishMode === 'live' ? 'var(--blue)' : 'var(--border)'), background: publishMode === 'live' ? 'rgba(2,133,206,0.15)' : 'transparent', color: publishMode === 'live' ? 'var(--white)' : 'var(--text-muted)', cursor: 'pointer', fontFamily: 'var(--font-display)', fontWeight: '700', fontSize: '0.85rem', transition: 'all 0.15s' }}
+              >
+                Direkt live
+              </button>
+              <button
+                onClick={() => setPublishMode('draft')}
+                style={{ flex: 1, padding: '0.75rem', borderRadius: '8px', border: '2px solid ' + (publishMode === 'draft' ? 'var(--blue)' : 'var(--border)'), background: publishMode === 'draft' ? 'rgba(2,133,206,0.15)' : 'transparent', color: publishMode === 'draft' ? 'var(--white)' : 'var(--text-muted)', cursor: 'pointer', fontFamily: 'var(--font-display)', fontWeight: '700', fontSize: '0.85rem', transition: 'all 0.15s' }}
+              >
+                Als Entwurf
+              </button>
             </div>
             <div className="btn-row">
               <button className="btn btn-publish" onClick={handlePublish} disabled={loading || !selectedImage}>
-                {publishMode === 'draft' ? '&#128221; Als Entwurf speichern' : '&#128640; Jetzt auf Wix veroeffentlichen'}
+                {publishMode === 'draft' ? 'Als Entwurf speichern' : 'Jetzt auf Wix veroeffentlichen'}
               </button>
             </div>
             {!selectedImage && <div style={{ fontSize: '0.75rem', color: 'var(--text-muted)', textAlign: 'center', marginTop: '0.5rem' }}>Bitte zuerst ein Titelbild auswaehlen.</div>}
@@ -701,9 +766,13 @@ export default function Home() {
               <div className="big-check">&#127881;</div>
               <h2>{publishMode === 'draft' ? 'Entwurf gespeichert!' : 'Artikel ist live!'}</h2>
               <p>{publishMode === 'draft' ? 'Dein Artikel wurde als Entwurf auf Wix gespeichert.' : 'Dein Blogartikel wurde erfolgreich auf branddoc.at veroeffentlicht.'}</p>
-              {publishedUrl && <a href={publishedUrl} target="_blank" rel="noopener noreferrer" className="btn btn-secondary" style={{ display: 'inline-flex', marginBottom: '1rem' }}>&#127760; Artikel ansehen</a>}
+              {publishedUrl && (
+                <a href={publishedUrl} target="_blank" rel="noopener noreferrer" className="btn btn-secondary" style={{ display: 'inline-flex', marginBottom: '1rem' }}>
+                  Artikel ansehen
+                </a>
+              )}
               <br />
-              <button className="btn btn-primary" onClick={handleReset} style={{ marginTop: '0.75rem' }}>&#9997;&#65039; Naechsten Artikel schreiben</button>
+              <button className="btn btn-primary" onClick={handleReset} style={{ marginTop: '0.75rem' }}>Naechsten Artikel schreiben</button>
             </div>
           </div>
         )}
