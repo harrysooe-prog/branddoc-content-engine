@@ -52,11 +52,70 @@ export default async function handler(req, res) {
     emptyParagraph,
     { type: 'DIVIDER', dividerData: {} },
     emptyParagraph,
-    { type: 'PARAGRAPH', nodes: [{ type: 'TEXT', textData: { text: 'Hallo, ich bin Harald Sturm 👋 Ich bin Marken-Arzt.', decorations: [{ type: 'BOLD' }] } }] },
+
+    // Zeile 1: Name + Titel (fett)
+    {
+      type: 'PARAGRAPH',
+      nodes: [{
+        type: 'TEXT',
+        textData: {
+          text: 'Hallo, ich bin Harald Sturm 👋 Ich bin Marken-Arzt – und Sparringpartner für KMU, CEOs & CMOs.',
+          decorations: [{ type: 'BOLD' }]
+        }
+      }]
+    },
     emptyParagraph,
-    { type: 'PARAGRAPH', nodes: [{ type: 'TEXT', textData: { text: 'Marken brauchen keinen Stylisten – sie brauchen manchmal einen Arzt. Ich diagnostiziere, warum starke Unternehmen unter ihrem Wert wahrgenommen werden, und begleite sie – beratend oder als Fractional CMO – dabei, das dauerhaft zu ändern.' } }] },
+
+    // Zeile 2: Bio mit teilweise fettem Text
+    {
+      type: 'PARAGRAPH',
+      nodes: [
+        { type: 'TEXT', textData: { text: 'Ich decodiere, warum starke Unternehmen unter ihrem Wert wahrgenommen werden – und begleite sie mit ' } },
+        { type: 'TEXT', textData: { text: '100 % Fokus auf Marke, Kommunikation & Sales', decorations: [{ type: 'BOLD' }] } },
+        { type: 'TEXT', textData: { text: ' dabei, das zu ändern. Beratend oder als Fractional CMO.' } }
+      ]
+    },
     emptyParagraph,
-    { type: 'PARAGRAPH', nodes: [{ type: 'TEXT', textData: { text: 'Meine These: Fast jedes Unternehmen ist besser als sein Marktauftritt. Wer seine Marke alle zwei Jahre neu erfindet, zahlt jedes Mal die Anlaufkosten – und erntet nie den Zinseszins.' } }] },
+
+    // Zeile 3: These mit fettem Label
+    {
+      type: 'PARAGRAPH',
+      nodes: [
+        { type: 'TEXT', textData: { text: 'Meine These: ', decorations: [{ type: 'BOLD' }] } },
+        { type: 'TEXT', textData: { text: 'Jedes Unternehmen ist besser als sein Marktauftritt. Wer seine Marke alle zwei Jahre neu erfindet, zahlt jedes Mal die Anlaufkosten – und erntet nie den Zinseszins.' } }
+      ]
+    },
+    emptyParagraph,
+
+    // Zeile 4: E-Mail als Link
+    {
+      type: 'PARAGRAPH',
+      nodes: [{
+        type: 'TEXT',
+        textData: {
+          text: 'branddoc@sturmerprobt.com',
+          decorations: [{
+            type: 'LINK',
+            linkData: { link: { url: 'mailto:branddoc@sturmerprobt.com' } }
+          }]
+        }
+      }]
+    },
+
+    // Zeile 5: Telefon als Link
+    {
+      type: 'PARAGRAPH',
+      nodes: [{
+        type: 'TEXT',
+        textData: {
+          text: '+43 7712 60 750',
+          decorations: [{
+            type: 'LINK',
+            linkData: { link: { url: 'tel:+437712607500' } }
+          }]
+        }
+      }]
+    },
     emptyParagraph
   )
 
